@@ -265,3 +265,42 @@ pub async fn leave(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// DELETE /api/v1/channels/{channel_id}
+///
+/// Deletes a channel. Requires admin/owner role in the workspace.
+pub async fn delete_channel(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(channel_id): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    let channel = sqlx::query_as::<_, Channel>(
+        "SELECT * FROM channels WHERE id = $1",
+    )
+    .bind(channel_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+
+    // Check workspace role: must be admin or owner
+    let role = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"
+    )
+    .bind(channel.workspace_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::Forbidden("Not a member of this workspace".into()))?;
+
+    if role != "admin" && role != "owner" {
+        return Err(AppError::Forbidden("Only workspace admins or owners can delete channels".into()));
+    }
+
+    // Cascade delete is handled by database foreign key constraints!
+    sqlx::query("DELETE FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .execute(&state.db)
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}

@@ -16,6 +16,11 @@ import {
   Sparkles,
   Search,
   Camera,
+  UserPlus,
+  Shield,
+  Trash2,
+  Copy,
+  Check,
 } from 'lucide-react';
 import CallRoom from '../components/CallRoom';
 
@@ -26,7 +31,7 @@ export default function MainPage() {
   const { user, token, clearAuth, updateUser } = useAuthStore();
   const chatStore = useChatStore();
 
-  // State for settings modal
+  // State for user settings modal
   const [showSettings, setShowSettings] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState(user?.display_name || '');
   const [editStatusEmoji, setEditStatusEmoji] = useState(user?.custom_status_emoji || '');
@@ -34,11 +39,18 @@ export default function MainPage() {
   const [settingsAvatarUrl, setSettingsAvatarUrl] = useState<string | null>(user?.avatar_url || null);
   const [settingsUploading, setSettingsUploading] = useState(false);
 
+  // State for workspace settings modal
+  const [showWorkspaceSettings, setShowWorkspaceSettings] = useState(false);
+  const [generatedInviteCode, setGeneratedInviteCode] = useState<string | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+
   // State for popups
   const [showNewWorkspace, setShowNewWorkspace] = useState(false);
+  const [workspaceModalTab, setWorkspaceModalTab] = useState<'create' | 'join'>('create');
   const [newWsName, setNewWsName] = useState('');
   const [newWsSlug, setNewWsSlug] = useState('');
   const [newWsDesc, setNewWsDesc] = useState('');
+  const [joinInviteCode, setJoinInviteCode] = useState('');
 
   const [showNewChannel, setShowNewChannel] = useState(false);
   const [newChanName, setNewChanName] = useState('');
@@ -181,6 +193,97 @@ export default function MainPage() {
       }
     } catch (e) {
       console.error('Create workspace failed', e);
+    }
+  };
+
+  const joinWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!joinInviteCode.trim()) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/join`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ code: joinInviteCode }),
+      });
+
+      if (res.ok) {
+        const workspace = await res.json();
+        setShowNewWorkspace(false);
+        setJoinInviteCode('');
+        fetchWorkspaces();
+        chatStore.setActiveWorkspaceId(workspace.id);
+      } else {
+        alert('Invalid invite code or unable to join workspace.');
+      }
+    } catch (err) {
+      console.error('Failed to join workspace', err);
+    }
+  };
+
+  const generateInviteCode = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/${chatStore.activeWorkspaceId}/invites`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGeneratedInviteCode(data.code);
+      }
+    } catch (err) {
+      console.error('Failed to generate invite code', err);
+    }
+  };
+
+  const updateMemberRole = async (targetUserId: string, role: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/${chatStore.activeWorkspaceId}/members/${targetUserId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ role }),
+      });
+      if (res.ok) {
+        fetchWorkspaceMembers();
+      }
+    } catch (err) {
+      console.error('Failed to update member role', err);
+    }
+  };
+
+  const kickMember = async (targetUserId: string) => {
+    if (!confirm('Are you sure you want to remove this member from the workspace?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/${chatStore.activeWorkspaceId}/members/${targetUserId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        fetchWorkspaceMembers();
+      }
+    } catch (err) {
+      console.error('Failed to kick member', err);
+    }
+  };
+
+  const deleteChannel = async (channelId: string) => {
+    if (!confirm('Are you sure you want to delete this channel? All messages will be permanently lost.')) return;
+    try {
+      const res = await fetch(`${API_BASE}/channels/${channelId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        fetchChannels();
+      }
+    } catch (err) {
+      console.error('Failed to delete channel', err);
     }
   };
 
@@ -390,7 +493,6 @@ export default function MainPage() {
           custom_status_text: updated.custom_status_text,
         });
         setShowSettings(false);
-        // Refresh members to reflect current profile details
         fetchWorkspaceMembers();
       }
     } catch (err) {
@@ -545,6 +647,12 @@ export default function MainPage() {
     );
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedInvite(true);
+    setTimeout(() => setCopiedInvite(false), 2000);
+  };
+
   // Helpers
   const currentWorkspace = chatStore.workspaces.find((w) => w.id === chatStore.activeWorkspaceId);
   const currentChannel = chatStore.channels.find((c) => c.id === chatStore.activeChannelId);
@@ -560,6 +668,11 @@ export default function MainPage() {
   const parentThreadMessages = currentChannelMessages.filter(
     (m) => m.parent_id === chatStore.activeThreadParent?.id || m.id === chatStore.activeThreadParent?.id
   );
+
+  // Check if current user is admin/owner
+  const currentUserMembership = workspaceMembers.find(m => m.id === user?.id);
+  const isWorkspaceAdminOrOwner = currentUserMembership?.role === 'admin' || currentUserMembership?.role === 'owner';
+  const isWorkspaceOwner = currentUserMembership?.role === 'owner';
 
   return (
     <div className="h-screen w-screen bg-[#070b13] flex overflow-hidden">
@@ -592,7 +705,10 @@ export default function MainPage() {
           ))}
 
           <button
-            onClick={() => setShowNewWorkspace(true)}
+            onClick={() => {
+              setWorkspaceModalTab('create');
+              setShowNewWorkspace(true);
+            }}
             className="w-12 h-12 bg-slate-950 border border-dashed border-slate-800 hover:border-indigo-500 hover:text-indigo-400 text-slate-500 rounded-2xl flex items-center justify-center transition-colors cursor-pointer"
           >
             <Plus className="h-5 w-5" />
@@ -613,7 +729,14 @@ export default function MainPage() {
           <span className="font-bold text-white text-sm tracking-wide truncate">
             {currentWorkspace?.name || 'Workspace'}
           </span>
-          <button className="text-slate-400 hover:text-slate-200 cursor-pointer">
+          <button
+            onClick={() => {
+              setGeneratedInviteCode(null);
+              setShowWorkspaceSettings(true);
+            }}
+            className="text-slate-400 hover:text-slate-200 cursor-pointer"
+            title="Workspace Settings"
+          >
             <Settings className="h-4 w-4" />
           </button>
         </div>
@@ -623,31 +746,45 @@ export default function MainPage() {
           <div>
             <div className="flex items-center justify-between px-3 text-slate-500 text-[11px] font-bold uppercase tracking-wider mb-2">
               <span>Channels</span>
-              <button
-                onClick={() => setShowNewChannel(true)}
-                className="hover:text-indigo-400 cursor-pointer"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
+              {isWorkspaceAdminOrOwner && (
+                <button
+                  onClick={() => setShowNewChannel(true)}
+                  className="hover:text-indigo-400 cursor-pointer"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
             <div className="space-y-0.5">
               {chatStore.channels.map((chan) => (
-                <button
+                <div
                   key={chan.id}
-                  onClick={() => chatStore.setActiveChannelId(chan.id)}
-                  className={`w-full px-3 py-2 rounded-xl flex items-center gap-2.5 text-sm transition-colors cursor-pointer ${
-                    chatStore.activeChannelId === chan.id
-                      ? 'bg-slate-900 text-white font-medium'
-                      : 'text-slate-400 hover:bg-slate-900/40 hover:text-slate-200'
-                  }`}
+                  className="group flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors hover:bg-slate-900/40"
                 >
-                  {chan.kind === 'voice' ? (
-                    <Volume2 className="h-4 w-4 shrink-0 text-slate-500" />
-                  ) : (
-                    <Hash className="h-4 w-4 shrink-0 text-slate-500" />
+                  <button
+                    onClick={() => chatStore.setActiveChannelId(chan.id)}
+                    className={`flex-1 flex items-center gap-2.5 cursor-pointer text-left ${
+                      chatStore.activeChannelId === chan.id ? 'text-white font-medium' : 'text-slate-400 group-hover:text-slate-200'
+                    }`}
+                  >
+                    {chan.kind === 'voice' ? (
+                      <Volume2 className="h-4 w-4 shrink-0 text-slate-500" />
+                    ) : (
+                      <Hash className="h-4 w-4 shrink-0 text-slate-500" />
+                    )}
+                    <span className="truncate">{chan.name}</span>
+                  </button>
+
+                  {isWorkspaceAdminOrOwner && chan.name !== 'general' && (
+                    <button
+                      onClick={() => deleteChannel(chan.id)}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-rose-400 rounded transition-opacity cursor-pointer shrink-0 ml-1.5"
+                      title="Delete Channel"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   )}
-                  <span className="truncate">{chan.name}</span>
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -670,7 +807,6 @@ export default function MainPage() {
                 const firstMember = membersList[0];
                 const presence = firstMember ? (chatStore.presences[firstMember.id] || firstMember.status) : 'offline';
                 
-                // Retrieve member details to display status and avatar
                 const dbMember = workspaceMembers.find(m => m.id === firstMember?.id);
                 const hasCustomStatus = dbMember?.custom_status_emoji || dbMember?.custom_status_text;
 
@@ -711,7 +847,6 @@ export default function MainPage() {
                       </div>
                     </div>
 
-                    {/* Status Hover Details tooltip */}
                     {hasCustomStatus && (
                       <span className="absolute left-full ml-2 bg-slate-950 text-white text-[10px] px-2.5 py-1.5 rounded-lg border border-slate-800 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-xl z-50">
                         {dbMember.custom_status_emoji} {dbMember.custom_status_text}
@@ -1183,7 +1318,6 @@ export default function MainPage() {
                     className="flex-1 bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white focus:outline-none text-sm placeholder-slate-700"
                   />
                 </div>
-                {/* Emoji status presets */}
                 <div className="flex gap-1.5 mt-2.5">
                   {STATUS_EMOJI_PRESETS.map((emoji) => (
                     <button
@@ -1228,62 +1362,112 @@ export default function MainPage() {
         </div>
       )}
 
-      {/* 7. Create Workspace Modal */}
+      {/* 7. Create/Join Workspace Modal */}
       {showNewWorkspace && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-50">
-          <div className="w-full max-w-md glass rounded-3xl p-8 relative overflow-hidden shadow-2xl border border-slate-800">
-            <h2 className="text-xl font-bold text-white mb-6">Create a new workspace</h2>
-            <form onSubmit={createWorkspace} className="space-y-4">
-              <div>
-                <label className="block text-slate-300 text-sm font-medium mb-1.5">Workspace Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Acme Corp"
-                  value={newWsName}
-                  onChange={(e) => {
-                    setNewWsName(e.target.value);
-                    setNewWsSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
-                  }}
-                  className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-300 text-sm font-medium mb-1.5">Slug (Workspace URL)</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. acme-corp"
-                  value={newWsSlug}
-                  onChange={(e) => setNewWsSlug(e.target.value)}
-                  className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-300 text-sm font-medium mb-1.5">Description</label>
-                <textarea
-                  placeholder="Optional details"
-                  value={newWsDesc}
-                  onChange={(e) => setNewWsDesc(e.target.value)}
-                  className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none"
-                />
-              </div>
-              <div className="flex justify-end gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setShowNewWorkspace(false)}
-                  className="px-4 py-2.5 text-slate-400 hover:text-white text-sm cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl text-sm shadow-lg active:scale-95 cursor-pointer"
-                >
-                  Create
-                </button>
-              </div>
-            </form>
+          <div className="w-full max-w-md glass rounded-3xl p-8 relative overflow-hidden shadow-2xl border border-slate-800 flex flex-col">
+            {/* Modal Tabs */}
+            <div className="flex border-b border-slate-800 pb-3 mb-6 gap-6">
+              <button
+                onClick={() => setWorkspaceModalTab('create')}
+                className={`pb-1 text-sm font-bold tracking-wide transition-colors cursor-pointer ${
+                  workspaceModalTab === 'create' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Create Workspace
+              </button>
+              <button
+                onClick={() => setWorkspaceModalTab('join')}
+                className={`pb-1 text-sm font-bold tracking-wide transition-colors cursor-pointer ${
+                  workspaceModalTab === 'join' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Join Workspace
+              </button>
+            </div>
+
+            {workspaceModalTab === 'create' ? (
+              <form onSubmit={createWorkspace} className="space-y-4">
+                <div>
+                  <label className="block text-slate-300 text-sm font-medium mb-1.5">Workspace Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Acme Corp"
+                    value={newWsName}
+                    onChange={(e) => {
+                      setNewWsName(e.target.value);
+                      setNewWsSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
+                    }}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 text-sm font-medium mb-1.5">Slug (Workspace URL)</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. acme-corp"
+                    value={newWsSlug}
+                    onChange={(e) => setNewWsSlug(e.target.value)}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 text-sm font-medium mb-1.5">Description</label>
+                  <textarea
+                    placeholder="Optional details"
+                    value={newWsDesc}
+                    onChange={(e) => setNewWsDesc(e.target.value)}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex justify-end gap-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewWorkspace(false)}
+                    className="px-4 py-2.5 text-slate-400 hover:text-white text-sm cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl text-sm shadow-lg active:scale-95 cursor-pointer"
+                  >
+                    Create
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={joinWorkspace} className="space-y-4">
+                <div>
+                  <label className="block text-slate-300 text-sm font-medium mb-1.5">Invite Code</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="invite_xxxxxxxxx"
+                    value={joinInviteCode}
+                    onChange={(e) => setJoinInviteCode(e.target.value)}
+                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex justify-end gap-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewWorkspace(false)}
+                    className="px-4 py-2.5 text-slate-400 hover:text-white text-sm cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl text-sm shadow-lg active:scale-95 cursor-pointer"
+                  >
+                    Join Workspace
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -1425,6 +1609,136 @@ export default function MainPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 10. Workspace Administration Settings Modal */}
+      {showWorkspaceSettings && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-50">
+          <div className="w-full max-w-lg glass rounded-3xl p-8 relative overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between shrink-0 mb-6 border-b border-slate-800 pb-3">
+              <h2 className="text-xl font-bold text-white">Workspace Management</h2>
+              <button
+                onClick={() => {
+                  setShowWorkspaceSettings(false);
+                  setGeneratedInviteCode(null);
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-8 pr-2 no-scrollbar min-h-0">
+              {/* Invite Generation Section */}
+              {isWorkspaceAdminOrOwner && (
+                <div className="p-5 bg-slate-950/45 border border-slate-850 rounded-2xl space-y-4">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <UserPlus className="h-4.5 w-4.5 text-indigo-400" />
+                    <span>Invite Members</span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Generate an invitation code. Anyone with this code can immediately join your workspace.
+                  </p>
+                  
+                  {generatedInviteCode ? (
+                    <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3.5 py-2.5 rounded-xl">
+                      <code className="text-indigo-400 text-xs font-semibold select-all flex-1 truncate">
+                        {generatedInviteCode}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(generatedInviteCode)}
+                        className="p-2 bg-slate-950 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0"
+                        title="Copy to clipboard"
+                      >
+                        {copiedInvite ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={generateInviteCode}
+                      className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl text-xs shadow-md cursor-pointer transition-transform active:scale-95"
+                    >
+                      Generate Invite Code
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Members Administration List */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Shield className="h-4.5 w-4.5 text-indigo-400" />
+                  <span>Members Directory</span>
+                </h3>
+
+                <div className="space-y-3">
+                  {workspaceMembers.map((member) => {
+                    const isSelf = member.id === user?.id;
+                    const canManage = isWorkspaceOwner && !isSelf;
+
+                    return (
+                      <div
+                        key={member.id}
+                        className="flex items-center justify-between p-3.5 bg-slate-900/30 border border-slate-850 rounded-xl"
+                      >
+                        <div className="flex items-center gap-3">
+                          {member.avatar_url ? (
+                            <img
+                              src={getAvatarUrl(member.avatar_url)!}
+                              alt={member.display_name}
+                              className="w-9 h-9 rounded-lg object-cover shrink-0"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 bg-slate-800 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0">
+                              {member.display_name.substring(0, 1).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-white text-xs font-semibold truncate flex items-center gap-1.5">
+                              <span>{member.display_name}</span>
+                              <span className={`text-[8.5px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                member.role === 'owner' 
+                                  ? 'bg-amber-950/45 border border-amber-600/30 text-amber-400'
+                                  : member.role === 'admin'
+                                  ? 'bg-indigo-950/45 border border-indigo-600/30 text-indigo-400'
+                                  : 'bg-slate-900 border border-slate-800 text-slate-500'
+                              }`}>
+                                {member.role}
+                              </span>
+                            </div>
+                            <div className="text-slate-500 text-[10px]">@{member.username}</div>
+                          </div>
+                        </div>
+
+                        {canManage && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* Role Select Toggle Selector */}
+                            <select
+                              value={member.role}
+                              onChange={(e) => updateMemberRole(member.id, e.target.value)}
+                              className="bg-slate-950 border border-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg focus:outline-none cursor-pointer"
+                            >
+                              <option value="member">Member</option>
+                              <option value="admin">Admin</option>
+                            </select>
+
+                            <button
+                              onClick={() => kickMember(member.id)}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/15 rounded-lg transition-colors cursor-pointer"
+                              title="Kick member"
+                            >
+                              <X className="h-4.5 w-4.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

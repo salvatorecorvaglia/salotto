@@ -31,9 +31,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/", post(handlers::workspaces::create).get(handlers::workspaces::list_mine))
         .route("/{workspace_id}", get(handlers::workspaces::get_by_id))
         .route("/{workspace_id}/members", post(handlers::workspaces::add_member).get(handlers::workspaces::list_members))
+        .route("/join", post(handlers::workspaces::join_workspace_by_invite))
+        .route("/{workspace_id}/invites", post(handlers::workspaces::create_invite))
         .route(
             "/{workspace_id}/members/{user_id}",
-            delete(handlers::workspaces::remove_member),
+            delete(handlers::workspaces::remove_member).patch(handlers::workspaces::update_member_role),
         )
         .route(
             "/{workspace_id}/channels",
@@ -46,7 +48,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/{workspace_id}/search", get(handlers::search::search_messages));
 
     let channel_routes = Router::new()
-        .route("/{channel_id}", get(handlers::channels::get_by_id).patch(handlers::channels::update))
+        .route("/{channel_id}", get(handlers::channels::get_by_id).patch(handlers::channels::update).delete(handlers::channels::delete_channel))
         .route("/{channel_id}/join", post(handlers::channels::join))
         .route("/{channel_id}/leave", post(handlers::channels::leave))
         .route("/{channel_id}/calls/token", post(handlers::calls::generate_call_token))

@@ -300,6 +300,166 @@ pub async fn list_members(
     Ok(Json(members))
 }
 
+#[derive(serde::Deserialize)]
+pub struct JoinInvitePayload {
+    pub code: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct UpdateRolePayload {
+    pub role: String,
+}
+
+#[derive(serde::Serialize, sqlx::FromRow)]
+pub struct InviteResponse {
+    pub code: String,
+    pub workspace_id: Uuid,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// POST /api/v1/workspaces/{workspace_id}/invites
+pub async fn create_invite(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(workspace_id): Path<Uuid>,
+) -> AppResult<Json<InviteResponse>> {
+    // Verify requester is an admin or owner of workspace
+    let member = require_workspace_member(&state, workspace_id, auth.user_id).await?;
+    if member.role != "admin" && member.role != "owner" {
+        return Err(AppError::Forbidden("Only workspace admins or owners can create invite codes".into()));
+    }
+
+    // Generate a simple secure code
+    let code = format!("invite_{}", &Uuid::now_v7().to_string().replace("-", "")[..12]);
+
+    let invite = sqlx::query_as::<_, InviteResponse>(
+        r#"
+        INSERT INTO workspace_invites (code, workspace_id, created_by)
+        VALUES ($1, $2, $3)
+        RETURNING code, workspace_id, created_at
+        "#
+    )
+    .bind(&code)
+    .bind(workspace_id)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(invite))
+}
+
+/// POST /api/v1/workspaces/join
+pub async fn join_workspace_by_invite(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Json(payload): Json<JoinInvitePayload>,
+) -> AppResult<Json<Workspace>> {
+    use sqlx::Row;
+
+    // Find the invite code
+    let invite = sqlx::query(
+        "SELECT workspace_id, max_uses, uses FROM workspace_invites WHERE code = $1"
+    )
+    .bind(&payload.code)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Invite code not found or invalid".into()))?;
+
+    let workspace_id: Uuid = invite.try_get("workspace_id")?;
+    let max_uses: Option<i32> = invite.try_get("max_uses")?;
+    let uses: i32 = invite.try_get("uses")?;
+
+    if let Some(max) = max_uses {
+        if uses >= max {
+            return Err(AppError::BadRequest("This invite link has reached its maximum usage limit".into()));
+        }
+    }
+
+    // Add user as member to workspace (on conflict ignore or return ok if already member)
+    sqlx::query(
+        r#"
+        INSERT INTO workspace_members (workspace_id, user_id, role)
+        VALUES ($1, $2, 'member')
+        ON CONFLICT (workspace_id, user_id) DO NOTHING
+        "#
+    )
+    .bind(workspace_id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await?;
+
+    // Auto-join #general channel (find general channel in workspace)
+    if let Ok(general_channel_id) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM channels WHERE workspace_id = $1 AND name = 'general' LIMIT 1"
+    )
+    .bind(workspace_id)
+    .fetch_one(&state.db)
+    .await {
+        sqlx::query(
+            "INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+        )
+        .bind(general_channel_id)
+        .bind(auth.user_id)
+        .execute(&state.db)
+        .await?;
+    }
+
+    // Update uses count
+    sqlx::query(
+        "UPDATE workspace_invites SET uses = uses + 1 WHERE code = $1"
+    )
+    .bind(&payload.code)
+    .execute(&state.db)
+    .await?;
+
+    // Return the joined workspace details
+    let workspace = sqlx::query_as::<_, Workspace>(
+        "SELECT * FROM workspaces WHERE id = $1"
+    )
+    .bind(workspace_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(workspace))
+}
+
+/// PATCH /api/v1/workspaces/{workspace_id}/members/{user_id}
+pub async fn update_member_role(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path((workspace_id, target_user_id)): Path<(Uuid, Uuid)>,
+    Json(payload): Json<UpdateRolePayload>,
+) -> AppResult<StatusCode> {
+    // Validate role target
+    if payload.role != "admin" && payload.role != "member" {
+        return Err(AppError::BadRequest("Invalid role. Role must be 'admin' or 'member'".into()));
+    }
+
+    // Verify requester is the workspace owner
+    let requester = require_workspace_member(&state, workspace_id, auth.user_id).await?;
+    if requester.role != "owner" {
+        return Err(AppError::Forbidden("Only the workspace owner can change member roles".into()));
+    }
+
+    // Make sure we're not modifying the owner's role
+    let target = require_workspace_member(&state, workspace_id, target_user_id).await?;
+    if target.role == "owner" {
+        return Err(AppError::Forbidden("The owner's role cannot be modified".into()));
+    }
+
+    // Update the role in workspace_members
+    sqlx::query(
+        "UPDATE workspace_members SET role = $3 WHERE workspace_id = $1 AND user_id = $2"
+    )
+    .bind(workspace_id)
+    .bind(target_user_id)
+    .bind(&payload.role)
+    .execute(&state.db)
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ── Helpers ──
 
 /// Verify that a user is a member of the given workspace.
