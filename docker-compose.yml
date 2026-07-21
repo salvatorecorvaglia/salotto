@@ -1,0 +1,126 @@
+services:
+  # ─────────────────────────────────────────────
+  # PostgreSQL 17 — Primary relational database
+  # ─────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: salotto-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: salotto
+      POSTGRES_PASSWORD: salotto_dev_password
+      POSTGRES_DB: salotto
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U salotto -d salotto"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - salotto-net
+
+  # ─────────────────────────────────────────────
+  # Redis 7 — Sessions, pub/sub, presence cache
+  # ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: salotto-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - salotto-net
+
+  # ─────────────────────────────────────────────
+  # MinIO — S3-compatible object storage
+  # ─────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: salotto-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - salotto-net
+
+  # ─────────────────────────────────────────────
+  # MinIO init — Create default bucket on startup
+  # ─────────────────────────────────────────────
+  createbucket:
+    image: minio/mc
+    container_name: salotto-createbucket
+    depends_on:
+      minio:
+        condition: service_started
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb --ignore-existing local/salotto;
+      /usr/bin/mc anonymous set download local/salotto/public;
+      echo 'Bucket salotto created successfully';
+      exit 0;
+      "
+    networks:
+      - salotto-net
+
+  # ─────────────────────────────────────────────
+  # LiveKit — WebRTC SFU for voice/video calls
+  # ─────────────────────────────────────────────
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: salotto-livekit
+    restart: unless-stopped
+    ports:
+      - "7880:7880"           # HTTP / WebSocket
+      - "7881:7881"           # RTC / gRPC
+      - "50000-50060:50000-50060/udp"  # WebRTC media (UDP)
+    command: >
+      --dev
+      --bind 0.0.0.0
+    environment:
+      LIVEKIT_KEYS: "devkey: devsecret"
+    networks:
+      - salotto-net
+
+# ─────────────────────────────────────────────
+# Persistent volumes
+# ─────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+
+# ─────────────────────────────────────────────
+# Shared network
+# ─────────────────────────────────────────────
+networks:
+  salotto-net:
+    driver: bridge
