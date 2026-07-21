@@ -39,15 +39,15 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code, message) = match &self {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, "BAD_REQUEST", msg.clone()),
-            AppError::Unauthorized(msg) => {
-                (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.clone())
-            }
+            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.clone()),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, "FORBIDDEN", msg.clone()),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, "NOT_FOUND", msg.clone()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, "CONFLICT", msg.clone()),
-            AppError::Validation(msg) => {
-                (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", msg.clone())
-            }
+            AppError::Validation(msg) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VALIDATION_ERROR",
+                msg.clone(),
+            ),
             AppError::Internal(err) => {
                 // Log internal errors at error level but don't leak details to clients
                 tracing::error!(error = ?err, "Internal server error");
@@ -81,7 +81,7 @@ impl From<sqlx::Error> for AppError {
             sqlx::Error::RowNotFound => AppError::NotFound("Resource not found".into()),
             sqlx::Error::Database(ref db_err) => {
                 // PostgreSQL unique violation
-                if db_err.code().map_or(false, |c| c == "23505") {
+                if db_err.code().is_some_and(|c| c == "23505") {
                     return AppError::Conflict("Resource already exists".into());
                 }
                 AppError::Internal(anyhow::anyhow!("Database error: {}", err))

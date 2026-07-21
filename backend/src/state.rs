@@ -30,9 +30,7 @@ impl AppState {
         let redis = redis::Client::open(config.redis_url.as_str())?;
         // Verify connectivity
         let mut conn = redis.get_multiplexed_async_connection().await?;
-        redis::cmd("PING")
-            .query_async::<String>(&mut conn)
-            .await?;
+        redis::cmd("PING").query_async::<String>(&mut conn).await?;
         tracing::info!("Connected to Redis");
 
         // ── S3 / MinIO client ──

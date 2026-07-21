@@ -77,9 +77,17 @@ pub struct CreateWorkspacePayload {
 /// starts and ends with an alphanumeric character.
 fn validate_slug(slug: &str) -> Result<(), validator::ValidationError> {
     let valid = !slug.is_empty()
-        && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && slug.chars().next().map_or(false, |c| c.is_ascii_alphanumeric())
-        && slug.chars().last().map_or(false, |c| c.is_ascii_alphanumeric())
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && slug
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
+        && slug
+            .chars()
+            .last()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
         && !slug.contains("--");
 
     if valid {

@@ -21,6 +21,7 @@ use super::jwt::{validate_token, Claims};
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub user_id: Uuid,
+    #[allow(dead_code)]
     pub claims: Claims,
 }
 
@@ -39,11 +40,11 @@ impl FromRequestParts<AppState> for AuthUser {
             .ok_or_else(|| AppError::Unauthorized("Missing Authorization header".into()))?;
 
         // Expect "Bearer <token>" format
-        let token = auth_header
-            .strip_prefix("Bearer ")
-            .ok_or_else(|| {
-                AppError::Unauthorized("Invalid Authorization header format, expected 'Bearer <token>'".into())
-            })?;
+        let token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+            AppError::Unauthorized(
+                "Invalid Authorization header format, expected 'Bearer <token>'".into(),
+            )
+        })?;
 
         // Validate the JWT
         let claims = validate_token(token, &state.config.jwt_secret)?;

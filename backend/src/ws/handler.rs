@@ -5,15 +5,11 @@ use axum::{
     },
     response::IntoResponse,
 };
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use futures_util::{SinkExt, StreamExt};
 
-use crate::{
-    auth::jwt::validate_token,
-    error::AppError,
-    state::AppState,
-};
+use crate::{auth::jwt::validate_token, error::AppError, state::AppState};
 
 /// Query parameter for WebSocket authentication.
 #[derive(Debug, Deserialize)]
@@ -54,10 +50,7 @@ pub enum WsServerMessage {
         content: String,
     },
     /// A message was deleted.
-    MessageDeleted {
-        channel_id: Uuid,
-        message_id: Uuid,
-    },
+    MessageDeleted { channel_id: Uuid, message_id: Uuid },
     /// A user is typing in a channel.
     Typing {
         channel_id: Uuid,
@@ -65,10 +58,7 @@ pub enum WsServerMessage {
         is_typing: bool,
     },
     /// A user's presence status changed.
-    Presence {
-        user_id: Uuid,
-        status: String,
-    },
+    Presence { user_id: Uuid, status: String },
     /// A user added an emoji reaction to a message.
     ReactionAdded {
         message_id: Uuid,
@@ -84,9 +74,7 @@ pub enum WsServerMessage {
     /// Server pong (keepalive response).
     Pong,
     /// Error message.
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 /// GET /ws?token=<jwt>
@@ -117,11 +105,12 @@ async fn handle_socket(socket: WebSocket, state: AppState, user_id: Uuid) {
 
     // 1. Get workspaces the user belongs to
     let workspaces = match sqlx::query_scalar::<_, Uuid>(
-        "SELECT workspace_id FROM workspace_members WHERE user_id = $1"
+        "SELECT workspace_id FROM workspace_members WHERE user_id = $1",
     )
     .bind(user_id)
     .fetch_all(&state.db)
-    .await {
+    .await
+    {
         Ok(ws) => ws,
         Err(e) => {
             tracing::error!(%user_id, error = ?e, "Failed to fetch user workspaces");
@@ -199,42 +188,54 @@ async fn handle_socket(socket: WebSocket, state: AppState, user_id: Uuid) {
     let state_clone = state.clone();
     while let Some(msg) = ws_receiver.next().await {
         match msg {
-            Ok(Message::Text(text)) => {
-                match serde_json::from_str::<WsClientMessage>(&text) {
-                    Ok(WsClientMessage::Ping) => {
-                        let pong = serde_json::to_string(&WsServerMessage::Pong).unwrap();
-                        let _ = tx.send(Message::Text(pong.into()));
-                    }
-                    Ok(WsClientMessage::TypingStart { channel_id }) => {
-                        if let Ok(workspace_id) = get_channel_workspace(&state_clone.db, channel_id).await {
-                            let event = WsServerMessage::Typing {
-                                channel_id,
-                                user_id,
-                                is_typing: true,
-                            };
-                            let _ = crate::ws::pubsub::publish_event(&state_clone.redis, workspace_id, &event).await;
-                        }
-                    }
-                    Ok(WsClientMessage::TypingStop { channel_id }) => {
-                        if let Ok(workspace_id) = get_channel_workspace(&state_clone.db, channel_id).await {
-                            let event = WsServerMessage::Typing {
-                                channel_id,
-                                user_id,
-                                is_typing: false,
-                            };
-                            let _ = crate::ws::pubsub::publish_event(&state_clone.redis, workspace_id, &event).await;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(%user_id, error = %e, "Invalid client message");
-                        let err_msg = serde_json::to_string(&WsServerMessage::Error {
-                            message: "Invalid message format".into(),
-                        })
-                        .unwrap();
-                        let _ = tx.send(Message::Text(err_msg.into()));
+            Ok(Message::Text(text)) => match serde_json::from_str::<WsClientMessage>(&text) {
+                Ok(WsClientMessage::Ping) => {
+                    let pong = serde_json::to_string(&WsServerMessage::Pong).unwrap();
+                    let _ = tx.send(Message::Text(pong.into()));
+                }
+                Ok(WsClientMessage::TypingStart { channel_id }) => {
+                    if let Ok(workspace_id) =
+                        get_channel_workspace(&state_clone.db, channel_id).await
+                    {
+                        let event = WsServerMessage::Typing {
+                            channel_id,
+                            user_id,
+                            is_typing: true,
+                        };
+                        let _ = crate::ws::pubsub::publish_event(
+                            &state_clone.redis,
+                            workspace_id,
+                            &event,
+                        )
+                        .await;
                     }
                 }
-            }
+                Ok(WsClientMessage::TypingStop { channel_id }) => {
+                    if let Ok(workspace_id) =
+                        get_channel_workspace(&state_clone.db, channel_id).await
+                    {
+                        let event = WsServerMessage::Typing {
+                            channel_id,
+                            user_id,
+                            is_typing: false,
+                        };
+                        let _ = crate::ws::pubsub::publish_event(
+                            &state_clone.redis,
+                            workspace_id,
+                            &event,
+                        )
+                        .await;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(%user_id, error = %e, "Invalid client message");
+                    let err_msg = serde_json::to_string(&WsServerMessage::Error {
+                        message: "Invalid message format".into(),
+                    })
+                    .unwrap();
+                    let _ = tx.send(Message::Text(err_msg.into()));
+                }
+            },
             Ok(Message::Close(_)) => {
                 tracing::info!(%user_id, "WebSocket closed by client");
                 break;

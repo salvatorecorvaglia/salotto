@@ -41,13 +41,11 @@ pub async fn create_dm(
     let conversation_id = Uuid::now_v7();
 
     // 2. Create conversation
-    sqlx::query(
-        "INSERT INTO direct_conversations (id, workspace_id) VALUES ($1, $2)",
-    )
-    .bind(conversation_id)
-    .bind(workspace_id)
-    .execute(&state.db)
-    .await?;
+    sqlx::query("INSERT INTO direct_conversations (id, workspace_id) VALUES ($1, $2)")
+        .bind(conversation_id)
+        .bind(workspace_id)
+        .execute(&state.db)
+        .await?;
 
     // 3. Add members (including creator)
     sqlx::query(
@@ -143,7 +141,7 @@ pub async fn list_dm_messages(
     // 1. Verify membership
     require_dm_member(&state.db, conversation_id, auth.user_id).await?;
 
-    let limit = query.limit.unwrap_or(50).min(100).max(1);
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let fetch_limit = limit + 1;
 
     let mut messages = if let Some(before) = query.before {
@@ -240,7 +238,11 @@ pub async fn send_dm_message(
 
 // ── Helpers ──
 
-async fn require_dm_member(db: &sqlx::PgPool, conversation_id: Uuid, user_id: Uuid) -> AppResult<()> {
+async fn require_dm_member(
+    db: &sqlx::PgPool,
+    conversation_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<()> {
     let is_member = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM direct_conversation_members WHERE conversation_id = $1 AND user_id = $2)",
     )
@@ -250,12 +252,18 @@ async fn require_dm_member(db: &sqlx::PgPool, conversation_id: Uuid, user_id: Uu
     .await?;
 
     if !is_member {
-        return Err(AppError::Forbidden("Not a member of this DM conversation".into()));
+        return Err(AppError::Forbidden(
+            "Not a member of this DM conversation".into(),
+        ));
     }
     Ok(())
 }
 
-async fn fetch_dm_details(db: &sqlx::PgPool, conversation_id: Uuid, user_id: Uuid) -> AppResult<DirectConversationResponse> {
+async fn fetch_dm_details(
+    db: &sqlx::PgPool,
+    conversation_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<DirectConversationResponse> {
     sqlx::query_as::<_, DirectConversationResponse>(
         r#"
         SELECT 

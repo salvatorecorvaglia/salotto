@@ -9,7 +9,9 @@ use crate::{
         password::{hash_password, verify_password},
     },
     error::{AppError, AppResult},
-    models::user::{AuthResponse, LoginPayload, RefreshPayload, RegisterPayload, User, UserProfile},
+    models::user::{
+        AuthResponse, LoginPayload, RefreshPayload, RegisterPayload, User, UserProfile,
+    },
     state::AppState,
 };
 
@@ -84,13 +86,11 @@ pub async fn login(
     Json(payload): Json<LoginPayload>,
 ) -> AppResult<Json<AuthResponse>> {
     // Find user by email
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE email = $1",
-    )
-    .bind(&payload.email)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+        .bind(&payload.email)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
 
     // Verify password
     let valid = verify_password(payload.password, user.password_hash.clone()).await?;
@@ -191,8 +191,7 @@ pub async fn logout(
     Json(payload): Json<RefreshPayload>,
 ) -> AppResult<StatusCode> {
     // Validate the refresh token to get the user ID
-    let claims = validate_token(&payload.refresh_token, &state.config.jwt_secret)
-        .ok();
+    let claims = validate_token(&payload.refresh_token, &state.config.jwt_secret).ok();
 
     if let Some(claims) = claims {
         // Delete the specific refresh token
@@ -210,11 +209,7 @@ pub async fn logout(
 // ── Helpers ──
 
 /// Store a SHA-256 hash of the refresh token in the database.
-async fn store_refresh_token(
-    state: &AppState,
-    user_id: Uuid,
-    raw_token: &str,
-) -> AppResult<()> {
+async fn store_refresh_token(state: &AppState, user_id: Uuid, raw_token: &str) -> AppResult<()> {
     let token_id = Uuid::now_v7();
     let token_hash = hash_token(raw_token);
     let expires_at = Utc::now() + Duration::seconds(state.config.jwt_refresh_ttl_secs);

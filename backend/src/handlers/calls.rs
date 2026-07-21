@@ -41,12 +41,11 @@ pub async fn generate_call_token(
     super::workspaces::require_workspace_member(&state, workspace_id, auth.user_id).await?;
 
     // 3. Fetch user's display name for LiveKit profile
-    let display_name = sqlx::query_scalar::<_, String>(
-        "SELECT display_name FROM users WHERE id = $1",
-    )
-    .bind(auth.user_id)
-    .fetch_one(&state.db)
-    .await?;
+    let display_name =
+        sqlx::query_scalar::<_, String>("SELECT display_name FROM users WHERE id = $1")
+            .bind(auth.user_id)
+            .fetch_one(&state.db)
+            .await?;
 
     // 4. Generate the token
     let api_key = &state.config.livekit_api_key;
@@ -65,7 +64,10 @@ pub async fn generate_call_token(
         .with_grants(grants)
         .to_jwt()
         .map_err(|e| {
-            AppError::Internal(anyhow::anyhow!("Failed to encode LiveKit access token: {}", e))
+            AppError::Internal(anyhow::anyhow!(
+                "Failed to encode LiveKit access token: {}",
+                e
+            ))
         })?;
 
     Ok(Json(CallTokenResponse {

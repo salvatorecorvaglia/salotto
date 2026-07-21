@@ -71,12 +71,12 @@ pub async fn send(
     .await?;
 
     // Broadcast via WebSocket / Redis pub-sub
-    if let Ok(workspace_id) = sqlx::query_scalar::<_, Uuid>(
-        "SELECT workspace_id FROM channels WHERE id = $1"
-    )
-    .bind(channel_id)
-    .fetch_one(&state.db)
-    .await {
+    if let Ok(workspace_id) =
+        sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM channels WHERE id = $1")
+            .bind(channel_id)
+            .fetch_one(&state.db)
+            .await
+    {
         let event = crate::ws::handler::WsServerMessage::NewMessage {
             channel_id,
             message_id: message.id,
@@ -108,7 +108,7 @@ pub async fn list(
     // Verify channel membership
     require_channel_member(&state, channel_id, auth.user_id).await?;
 
-    let limit = query.limit.unwrap_or(50).min(100).max(1);
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
     // Fetch one extra to determine if there are more pages
     let fetch_limit = limit + 1;
 
@@ -169,10 +169,7 @@ pub async fn list(
     .execute(&state.db)
     .await?;
 
-    Ok(Json(MessagePage {
-        messages,
-        has_more,
-    }))
+    Ok(Json(MessagePage { messages, has_more }))
 }
 
 /// PATCH /api/v1/messages/:message_id
@@ -189,13 +186,11 @@ pub async fn edit(
         .map_err(|e| AppError::Validation(e.to_string()))?;
 
     // Fetch the message and verify ownership
-    let existing = sqlx::query_as::<_, Message>(
-        "SELECT * FROM messages WHERE id = $1",
-    )
-    .bind(message_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Message not found".into()))?;
+    let existing = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1")
+        .bind(message_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Message not found".into()))?;
 
     if existing.sender_id != auth.user_id {
         return Err(AppError::Forbidden(
@@ -227,12 +222,12 @@ pub async fn edit(
     .await?;
 
     // Broadcast edit event via WebSocket
-    if let Ok(workspace_id) = sqlx::query_scalar::<_, Uuid>(
-        "SELECT workspace_id FROM channels WHERE id = $1"
-    )
-    .bind(message.channel_id.unwrap_or_default())
-    .fetch_one(&state.db)
-    .await {
+    if let Ok(workspace_id) =
+        sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM channels WHERE id = $1")
+            .bind(message.channel_id.unwrap_or_default())
+            .fetch_one(&state.db)
+            .await
+    {
         let event = crate::ws::handler::WsServerMessage::MessageEdited {
             channel_id: message.channel_id.unwrap_or_default(),
             message_id: message.id,
@@ -252,13 +247,11 @@ pub async fn delete_msg(
     State(state): State<AppState>,
     Path(message_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
-    let existing = sqlx::query_as::<_, Message>(
-        "SELECT * FROM messages WHERE id = $1",
-    )
-    .bind(message_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Message not found".into()))?;
+    let existing = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1")
+        .bind(message_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Message not found".into()))?;
 
     // Check ownership (admin override could be added later)
     if existing.sender_id != auth.user_id {
@@ -273,12 +266,12 @@ pub async fn delete_msg(
         .await?;
 
     // Broadcast delete event via WebSocket
-    if let Ok(workspace_id) = sqlx::query_scalar::<_, Uuid>(
-        "SELECT workspace_id FROM channels WHERE id = $1"
-    )
-    .bind(existing.channel_id.unwrap_or_default())
-    .fetch_one(&state.db)
-    .await {
+    if let Ok(workspace_id) =
+        sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM channels WHERE id = $1")
+            .bind(existing.channel_id.unwrap_or_default())
+            .fetch_one(&state.db)
+            .await
+    {
         let event = crate::ws::handler::WsServerMessage::MessageDeleted {
             channel_id: existing.channel_id.unwrap_or_default(),
             message_id: existing.id,
@@ -306,9 +299,7 @@ async fn require_channel_member(
     .await?;
 
     if !is_member {
-        return Err(AppError::Forbidden(
-            "Not a member of this channel".into(),
-        ));
+        return Err(AppError::Forbidden("Not a member of this channel".into()));
     }
 
     Ok(())

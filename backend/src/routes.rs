@@ -1,13 +1,9 @@
 use axum::{
     http::{header, Method},
-    routing::{get, patch, post, delete},
+    routing::{delete, get, patch, post},
     Router,
 };
-use tower_http::{
-    compression::CompressionLayer,
-    cors::CorsLayer,
-    trace::TraceLayer,
-};
+use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
 
 use crate::handlers;
 use crate::state::AppState;
@@ -24,18 +20,34 @@ pub fn create_router(state: AppState) -> Router {
 
     // ── Protected routes (auth required) ──
     let user_routes = Router::new()
-        .route("/me", get(handlers::users::get_me).patch(handlers::users::update_me))
+        .route(
+            "/me",
+            get(handlers::users::get_me).patch(handlers::users::update_me),
+        )
         .route("/{user_id}", get(handlers::users::get_user));
 
     let workspace_routes = Router::new()
-        .route("/", post(handlers::workspaces::create).get(handlers::workspaces::list_mine))
+        .route(
+            "/",
+            post(handlers::workspaces::create).get(handlers::workspaces::list_mine),
+        )
         .route("/{workspace_id}", get(handlers::workspaces::get_by_id))
-        .route("/{workspace_id}/members", post(handlers::workspaces::add_member).get(handlers::workspaces::list_members))
-        .route("/join", post(handlers::workspaces::join_workspace_by_invite))
-        .route("/{workspace_id}/invites", post(handlers::workspaces::create_invite))
+        .route(
+            "/{workspace_id}/members",
+            post(handlers::workspaces::add_member).get(handlers::workspaces::list_members),
+        )
+        .route(
+            "/join",
+            post(handlers::workspaces::join_workspace_by_invite),
+        )
+        .route(
+            "/{workspace_id}/invites",
+            post(handlers::workspaces::create_invite),
+        )
         .route(
             "/{workspace_id}/members/{user_id}",
-            delete(handlers::workspaces::remove_member).patch(handlers::workspaces::update_member_role),
+            delete(handlers::workspaces::remove_member)
+                .patch(handlers::workspaces::update_member_role),
         )
         .route(
             "/{workspace_id}/channels",
@@ -45,25 +57,47 @@ pub fn create_router(state: AppState) -> Router {
             "/{workspace_id}/dms",
             post(handlers::dms::create_dm).get(handlers::dms::list_dms),
         )
-        .route("/{workspace_id}/search", get(handlers::search::search_messages));
+        .route(
+            "/{workspace_id}/search",
+            get(handlers::search::search_messages),
+        );
 
     let channel_routes = Router::new()
-        .route("/{channel_id}", get(handlers::channels::get_by_id).patch(handlers::channels::update).delete(handlers::channels::delete_channel))
+        .route(
+            "/{channel_id}",
+            get(handlers::channels::get_by_id)
+                .patch(handlers::channels::update)
+                .delete(handlers::channels::delete_channel),
+        )
         .route("/{channel_id}/join", post(handlers::channels::join))
         .route("/{channel_id}/leave", post(handlers::channels::leave))
-        .route("/{channel_id}/calls/token", post(handlers::calls::generate_call_token))
+        .route(
+            "/{channel_id}/calls/token",
+            post(handlers::calls::generate_call_token),
+        )
         .route(
             "/{channel_id}/messages",
             post(handlers::messages::send).get(handlers::messages::list),
         );
 
     let message_routes = Router::new()
-        .route("/{message_id}", patch(handlers::messages::edit).delete(handlers::messages::delete_msg))
-        .route("/{message_id}/reactions", post(handlers::reactions::add_reaction))
-        .route("/{message_id}/reactions/{emoji}", delete(handlers::reactions::remove_reaction));
+        .route(
+            "/{message_id}",
+            patch(handlers::messages::edit).delete(handlers::messages::delete_msg),
+        )
+        .route(
+            "/{message_id}/reactions",
+            post(handlers::reactions::add_reaction),
+        )
+        .route(
+            "/{message_id}/reactions/{emoji}",
+            delete(handlers::reactions::remove_reaction),
+        );
 
-    let dm_routes = Router::new()
-        .route("/{conversation_id}/messages", post(handlers::dms::send_dm_message).get(handlers::dms::list_dm_messages));
+    let dm_routes = Router::new().route(
+        "/{conversation_id}/messages",
+        post(handlers::dms::send_dm_message).get(handlers::dms::list_dm_messages),
+    );
 
     let file_routes = Router::new()
         .route("/upload", post(handlers::files::upload_file))

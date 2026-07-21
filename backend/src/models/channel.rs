@@ -19,6 +19,7 @@ pub struct Channel {
 
 /// Channel membership join-table row.
 #[derive(Debug, Clone, FromRow, Serialize)]
+#[allow(dead_code)]
 pub struct ChannelMember {
     pub channel_id: Uuid,
     pub user_id: Uuid,
@@ -36,6 +37,7 @@ pub enum ChannelKind {
 }
 
 impl ChannelKind {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Text => "text",

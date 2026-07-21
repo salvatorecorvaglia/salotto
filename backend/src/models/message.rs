@@ -38,7 +38,11 @@ pub struct Attachment {
 /// Payload for sending a new message.
 #[derive(Debug, Deserialize, Validate)]
 pub struct SendMessagePayload {
-    #[validate(length(min = 1, max = 4000, message = "Message content must be 1–4000 characters"))]
+    #[validate(length(
+        min = 1,
+        max = 4000,
+        message = "Message content must be 1–4000 characters"
+    ))]
     pub content: String,
 
     /// Optional parent message ID for threaded replies.
@@ -51,7 +55,11 @@ pub struct SendMessagePayload {
 /// Payload for editing an existing message.
 #[derive(Debug, Deserialize, Validate)]
 pub struct EditMessagePayload {
-    #[validate(length(min = 1, max = 4000, message = "Message content must be 1–4000 characters"))]
+    #[validate(length(
+        min = 1,
+        max = 4000,
+        message = "Message content must be 1–4000 characters"
+    ))]
     pub content: String,
 }
 

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, State, Path},
+    extract::{Multipart, Path, State},
     Json,
 };
 use uuid::Uuid;
@@ -104,23 +104,21 @@ pub async fn download_file(
         .key(&key)
         .send()
         .await
-        .map_err(|e| {
-            AppError::NotFound(format!("File not found in S3: {}", e))
-        })?;
+        .map_err(|e| AppError::NotFound(format!("File not found in S3: {}", e)))?;
 
     let content_type = output
         .content_type()
         .unwrap_or("application/octet-stream")
         .to_string();
 
-    let data = output.body.collect().await.map_err(|e| {
-        AppError::Internal(anyhow::anyhow!("Failed to read body bytes from S3: {}", e))
-    })?.into_bytes();
+    let data = output
+        .body
+        .collect()
+        .await
+        .map_err(|e| {
+            AppError::Internal(anyhow::anyhow!("Failed to read body bytes from S3: {}", e))
+        })?
+        .into_bytes();
 
-    Ok((
-        [
-            (axum::http::header::CONTENT_TYPE, content_type),
-        ],
-        data,
-    ))
+    Ok(([(axum::http::header::CONTENT_TYPE, content_type)], data))
 }

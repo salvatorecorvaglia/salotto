@@ -6,10 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    auth::middleware::AuthUser,
-    error::AppResult,
-    models::message::Message,
-    state::AppState,
+    auth::middleware::AuthUser, error::AppResult, models::message::Message, state::AppState,
 };
 
 #[derive(Deserialize)]

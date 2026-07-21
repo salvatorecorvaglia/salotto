@@ -15,10 +15,7 @@ use crate::{
 /// GET /api/v1/users/me
 ///
 /// Returns the authenticated user's full profile (including email).
-pub async fn get_me(
-    auth: AuthUser,
-    State(state): State<AppState>,
-) -> AppResult<Json<User>> {
+pub async fn get_me(auth: AuthUser, State(state): State<AppState>) -> AppResult<Json<User>> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(auth.user_id)
         .fetch_one(&state.db)

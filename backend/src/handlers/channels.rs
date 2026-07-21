@@ -61,13 +61,11 @@ pub async fn create(
     .await?;
 
     // Auto-join the creator
-    sqlx::query(
-        "INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)",
-    )
-    .bind(channel_id)
-    .bind(auth.user_id)
-    .execute(&state.db)
-    .await?;
+    sqlx::query("INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)")
+        .bind(channel_id)
+        .bind(auth.user_id)
+        .execute(&state.db)
+        .await?;
 
     // If the channel is public, auto-join all workspace members
     if !is_private {
@@ -130,13 +128,11 @@ pub async fn get_by_id(
     State(state): State<AppState>,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<Channel>> {
-    let channel = sqlx::query_as::<_, Channel>(
-        "SELECT * FROM channels WHERE id = $1",
-    )
-    .bind(channel_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+    let channel = sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
     // Verify workspace membership
     require_workspace_member(&state, channel.workspace_id, auth.user_id).await?;
@@ -174,13 +170,11 @@ pub async fn update(
         .validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
 
-    let channel = sqlx::query_as::<_, Channel>(
-        "SELECT * FROM channels WHERE id = $1",
-    )
-    .bind(channel_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+    let channel = sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
     // Verify workspace membership (admin check could be added here)
     require_workspace_member(&state, channel.workspace_id, auth.user_id).await?;
@@ -214,13 +208,11 @@ pub async fn join(
     State(state): State<AppState>,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
-    let channel = sqlx::query_as::<_, Channel>(
-        "SELECT * FROM channels WHERE id = $1",
-    )
-    .bind(channel_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+    let channel = sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
     // Must be a workspace member
     require_workspace_member(&state, channel.workspace_id, auth.user_id).await?;
@@ -255,13 +247,11 @@ pub async fn leave(
     State(state): State<AppState>,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
-    sqlx::query(
-        "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2",
-    )
-    .bind(channel_id)
-    .bind(auth.user_id)
-    .execute(&state.db)
-    .await?;
+    sqlx::query("DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2")
+        .bind(channel_id)
+        .bind(auth.user_id)
+        .execute(&state.db)
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -274,17 +264,15 @@ pub async fn delete_channel(
     State(state): State<AppState>,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
-    let channel = sqlx::query_as::<_, Channel>(
-        "SELECT * FROM channels WHERE id = $1",
-    )
-    .bind(channel_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+    let channel = sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
     // Check workspace role: must be admin or owner
     let role = sqlx::query_scalar::<_, String>(
-        "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"
+        "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
     )
     .bind(channel.workspace_id)
     .bind(auth.user_id)
@@ -293,7 +281,9 @@ pub async fn delete_channel(
     .ok_or_else(|| AppError::Forbidden("Not a member of this workspace".into()))?;
 
     if role != "admin" && role != "owner" {
-        return Err(AppError::Forbidden("Only workspace admins or owners can delete channels".into()));
+        return Err(AppError::Forbidden(
+            "Only workspace admins or owners can delete channels".into(),
+        ));
     }
 
     // Cascade delete is handled by database foreign key constraints!
