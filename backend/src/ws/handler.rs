@@ -7,6 +7,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use futures_util::{SinkExt, StreamExt};
 
 use crate::{
     auth::jwt::validate_token,
@@ -22,7 +23,7 @@ pub struct WsAuthQuery {
 }
 
 /// Messages sent FROM the client TO the server.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "payload")]
 #[serde(rename_all = "snake_case")]
 pub enum WsClientMessage {
@@ -35,7 +36,7 @@ pub enum WsClientMessage {
 }
 
 /// Messages sent FROM the server TO the client.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "payload")]
 #[serde(rename_all = "snake_case")]
 pub enum WsServerMessage {
@@ -99,45 +100,126 @@ pub async fn ws_upgrade(
 }
 
 /// Handle an established WebSocket connection.
-///
-/// This is the skeleton — full pub/sub integration with Redis
-/// will be implemented in Phase 2.
-async fn handle_socket(mut socket: WebSocket, _state: AppState, user_id: Uuid) {
+async fn handle_socket(socket: WebSocket, state: AppState, user_id: Uuid) {
     tracing::info!(%user_id, "WebSocket connected");
 
-    // TODO (Phase 2):
-    // 1. Subscribe to Redis pub/sub channels for the user's workspace(s)
-    // 2. Spawn a task to forward Redis messages → WebSocket
-    // 3. Handle incoming WS messages (typing indicators, etc.)
+    // 1. Get workspaces the user belongs to
+    let workspaces = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT workspace_id FROM workspace_members WHERE user_id = $1"
+    )
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await {
+        Ok(ws) => ws,
+        Err(e) => {
+            tracing::error!(%user_id, error = ?e, "Failed to fetch user workspaces");
+            return;
+        }
+    };
 
-    while let Some(msg) = socket.recv().await {
+    // 2. Set user status to 'online' and broadcast presence
+    let _ = sqlx::query("UPDATE users SET status = 'online', last_seen_at = NOW() WHERE id = $1")
+        .bind(user_id)
+        .execute(&state.db)
+        .await;
+
+    for ws_id in &workspaces {
+        let event = WsServerMessage::Presence {
+            user_id,
+            status: "online".to_string(),
+        };
+        let _ = crate::ws::pubsub::publish_event(&state.redis, *ws_id, &event).await;
+    }
+
+    // 3. Setup async PubSub connection to Redis
+    let mut pubsub = match state.redis.get_async_pubsub().await {
+        Ok(ps) => ps,
+        Err(e) => {
+            tracing::error!(%user_id, error = ?e, "Failed to get async pubsub connection");
+            return;
+        }
+    };
+
+    // Subscribe to all workspace channels
+    for ws_id in &workspaces {
+        let channel = format!("workspace:{}", ws_id);
+        if let Err(e) = pubsub.subscribe(&channel).await {
+            tracing::error!(%user_id, %channel, error = ?e, "Failed to subscribe to workspace channel");
+            return;
+        }
+    }
+
+    // Split WebSocket
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
+    // Outgoing message channel to coordinate writes to the WebSocket
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
+
+    // Spawn task to write messages to the WebSocket
+    let write_task = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if ws_sender.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Spawn task to forward Redis PubSub messages to the WebSocket writer channel
+    let tx_redis = tx.clone();
+    let forward_task = tokio::spawn(async move {
+        let mut pubsub = pubsub;
+        let mut pubsub_stream = pubsub.on_message();
+        while let Some(msg) = pubsub_stream.next().await {
+            let payload: String = match msg.get_payload() {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!(error = ?e, "Failed to read Redis pubsub payload");
+                    continue;
+                }
+            };
+            if tx_redis.send(Message::Text(payload.into())).is_err() {
+                break;
+            }
+        }
+    });
+
+    // 4. Handle incoming messages from the client
+    let state_clone = state.clone();
+    while let Some(msg) = ws_receiver.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                // Try to parse as a client message
                 match serde_json::from_str::<WsClientMessage>(&text) {
                     Ok(WsClientMessage::Ping) => {
                         let pong = serde_json::to_string(&WsServerMessage::Pong).unwrap();
-                        if socket.send(Message::Text(pong.into())).await.is_err() {
-                            break;
-                        }
+                        let _ = tx.send(Message::Text(pong.into()));
                     }
                     Ok(WsClientMessage::TypingStart { channel_id }) => {
-                        tracing::debug!(%user_id, %channel_id, "typing start");
-                        // TODO: Broadcast via Redis pub/sub
+                        if let Ok(workspace_id) = get_channel_workspace(&state_clone.db, channel_id).await {
+                            let event = WsServerMessage::Typing {
+                                channel_id,
+                                user_id,
+                                is_typing: true,
+                            };
+                            let _ = crate::ws::pubsub::publish_event(&state_clone.redis, workspace_id, &event).await;
+                        }
                     }
                     Ok(WsClientMessage::TypingStop { channel_id }) => {
-                        tracing::debug!(%user_id, %channel_id, "typing stop");
-                        // TODO: Broadcast via Redis pub/sub
+                        if let Ok(workspace_id) = get_channel_workspace(&state_clone.db, channel_id).await {
+                            let event = WsServerMessage::Typing {
+                                channel_id,
+                                user_id,
+                                is_typing: false,
+                            };
+                            let _ = crate::ws::pubsub::publish_event(&state_clone.redis, workspace_id, &event).await;
+                        }
                     }
                     Err(e) => {
-                        tracing::warn!(%user_id, error = %e, "Invalid WebSocket message");
-                        let err = serde_json::to_string(&WsServerMessage::Error {
+                        tracing::warn!(%user_id, error = %e, "Invalid client message");
+                        let err_msg = serde_json::to_string(&WsServerMessage::Error {
                             message: "Invalid message format".into(),
                         })
                         .unwrap();
-                        if socket.send(Message::Text(err.into())).await.is_err() {
-                            break;
-                        }
+                        let _ = tx.send(Message::Text(err_msg.into()));
                     }
                 }
             }
@@ -149,11 +231,35 @@ async fn handle_socket(mut socket: WebSocket, _state: AppState, user_id: Uuid) {
                 tracing::warn!(%user_id, error = %e, "WebSocket error");
                 break;
             }
-            _ => {} // Ignore binary, ping, pong frames
+            _ => {}
         }
     }
 
-    tracing::info!(%user_id, "WebSocket disconnected");
+    // Clean up tasks
+    forward_task.abort();
+    write_task.abort();
 
-    // TODO: Update user presence to "offline" via Redis
+    // 5. Update user presence to offline and broadcast
+    let _ = sqlx::query("UPDATE users SET status = 'offline', last_seen_at = NOW() WHERE id = $1")
+        .bind(user_id)
+        .execute(&state.db)
+        .await;
+
+    for ws_id in &workspaces {
+        let event = WsServerMessage::Presence {
+            user_id,
+            status: "offline".to_string(),
+        };
+        let _ = crate::ws::pubsub::publish_event(&state.redis, *ws_id, &event).await;
+    }
+
+    tracing::info!(%user_id, "WebSocket disconnected");
+}
+
+/// Helper function to fetch the workspace Uuid for a given channel Uuid
+async fn get_channel_workspace(db: &sqlx::PgPool, channel_id: Uuid) -> Result<Uuid, sqlx::Error> {
+    sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_one(db)
+        .await
 }

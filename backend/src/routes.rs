@@ -44,6 +44,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/{channel_id}", get(handlers::channels::get_by_id).patch(handlers::channels::update))
         .route("/{channel_id}/join", post(handlers::channels::join))
         .route("/{channel_id}/leave", post(handlers::channels::leave))
+        .route("/{channel_id}/calls/token", post(handlers::calls::generate_call_token))
         .route(
             "/{channel_id}/messages",
             post(handlers::messages::send).get(handlers::messages::list),
@@ -52,13 +53,17 @@ pub fn create_router(state: AppState) -> Router {
     let message_routes = Router::new()
         .route("/{message_id}", patch(handlers::messages::edit).delete(handlers::messages::delete_msg));
 
+    let file_routes = Router::new()
+        .route("/upload", post(handlers::files::upload_file));
+
     // ── Assemble the full API ──
     let api = Router::new()
         .nest("/auth", auth_routes)
         .nest("/users", user_routes)
         .nest("/workspaces", workspace_routes)
         .nest("/channels", channel_routes)
-        .nest("/messages", message_routes);
+        .nest("/messages", message_routes)
+        .nest("/files", file_routes);
 
     // ── Root router with middleware ──
     Router::new()

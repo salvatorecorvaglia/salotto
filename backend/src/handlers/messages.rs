@@ -70,7 +70,21 @@ pub async fn send(
     .fetch_one(&state.db)
     .await?;
 
-    // TODO: Broadcast via WebSocket / Redis pub-sub
+    // Broadcast via WebSocket / Redis pub-sub
+    if let Ok(workspace_id) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT workspace_id FROM channels WHERE id = $1"
+    )
+    .bind(channel_id)
+    .fetch_one(&state.db)
+    .await {
+        let event = crate::ws::handler::WsServerMessage::NewMessage {
+            channel_id,
+            message_id: message.id,
+            sender_id: message.sender_id,
+            content: message.content.clone(),
+        };
+        let _ = crate::ws::pubsub::publish_event(&state.redis, workspace_id, &event).await;
+    }
 
     Ok((StatusCode::CREATED, Json(message)))
 }
@@ -188,7 +202,20 @@ pub async fn edit(
     .fetch_one(&state.db)
     .await?;
 
-    // TODO: Broadcast edit event via WebSocket
+    // Broadcast edit event via WebSocket
+    if let Ok(workspace_id) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT workspace_id FROM channels WHERE id = $1"
+    )
+    .bind(message.channel_id)
+    .fetch_one(&state.db)
+    .await {
+        let event = crate::ws::handler::WsServerMessage::MessageEdited {
+            channel_id: message.channel_id,
+            message_id: message.id,
+            content: message.content.clone(),
+        };
+        let _ = crate::ws::pubsub::publish_event(&state.redis, workspace_id, &event).await;
+    }
 
     Ok(Json(message))
 }
@@ -221,7 +248,19 @@ pub async fn delete_msg(
         .execute(&state.db)
         .await?;
 
-    // TODO: Broadcast delete event via WebSocket
+    // Broadcast delete event via WebSocket
+    if let Ok(workspace_id) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT workspace_id FROM channels WHERE id = $1"
+    )
+    .bind(existing.channel_id)
+    .fetch_one(&state.db)
+    .await {
+        let event = crate::ws::handler::WsServerMessage::MessageDeleted {
+            channel_id: existing.channel_id,
+            message_id: existing.id,
+        };
+        let _ = crate::ws::pubsub::publish_event(&state.redis, workspace_id, &event).await;
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

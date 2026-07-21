@@ -8,10 +8,12 @@ license = "MIT"
 
 [dependencies]
 # ── Web framework & async runtime ──
-axum = { version = "0.8", features = ["ws", "macros"] }
+axum = { version = "0.8", features = ["ws", "macros", "multipart"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip"] }
+futures-util = "0.3"
+livekit-api = "0.5.6"
 
 # ── Database ──
 sqlx = { version = "0.8", features = [
