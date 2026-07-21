@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore, API_BASE } from '../store/chatStore';
 import {
@@ -83,7 +83,7 @@ export default function MainPage() {
     return () => {
       chatStore.disconnectSocket();
     };
-  }, []);
+  }, [chatStore, fetchWorkspaces]);
 
   // Fetch domain entities on active workspace changes
   useEffect(() => {
@@ -92,26 +92,29 @@ export default function MainPage() {
       fetchDms();
       fetchWorkspaceMembers();
     }
-  }, [chatStore.activeWorkspaceId]);
+  }, [chatStore.activeWorkspaceId, fetchChannels, fetchDms, fetchWorkspaceMembers]);
 
   // Fetch messages when active channel changes
   useEffect(() => {
     if (chatStore.activeChannelId) {
       fetchMessages();
     }
-  }, [chatStore.activeChannelId]);
+  }, [chatStore.activeChannelId, fetchMessages]);
 
   // Fetch DM messages when active DM changes
   useEffect(() => {
     if (chatStore.activeConversationId) {
       fetchDmMessages();
     }
-  }, [chatStore.activeConversationId]);
+  }, [chatStore.activeConversationId, fetchDmMessages]);
 
   // Auto-scroll messages
+  const activeMessageKey = chatStore.activeChannelId || chatStore.activeConversationId || '';
+  const messagesForActiveChannel = chatStore.messages[activeMessageKey];
+
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatStore.messages[chatStore.activeChannelId || chatStore.activeConversationId || '']]);
+  }, [messagesForActiveChannel]);
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -154,7 +157,7 @@ export default function MainPage() {
 
   // ── API Actions ──
 
-  const fetchWorkspaces = async () => {
+  const fetchWorkspaces = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/workspaces`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -169,7 +172,7 @@ export default function MainPage() {
     } catch (e) {
       console.error('Fetch workspaces failed', e);
     }
-  };
+  }, [chatStore, token]);
 
   const createWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -287,7 +290,7 @@ export default function MainPage() {
     }
   };
 
-  const fetchChannels = async () => {
+  const fetchChannels = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/workspaces/${chatStore.activeWorkspaceId}/channels`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -302,7 +305,7 @@ export default function MainPage() {
     } catch (e) {
       console.error('Fetch channels failed', e);
     }
-  };
+  }, [chatStore, token]);
 
   const createChannel = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -334,7 +337,7 @@ export default function MainPage() {
     }
   };
 
-  const fetchDms = async () => {
+  const fetchDms = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/workspaces/${chatStore.activeWorkspaceId}/dms`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -346,9 +349,9 @@ export default function MainPage() {
     } catch (e) {
       console.error('Fetch DMs failed', e);
     }
-  };
+  }, [chatStore, token]);
 
-  const fetchWorkspaceMembers = async () => {
+  const fetchWorkspaceMembers = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/workspaces/${chatStore.activeWorkspaceId}/members`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -360,7 +363,7 @@ export default function MainPage() {
     } catch (e) {
       console.error('Fetch workspace members failed', e);
     }
-  };
+  }, [chatStore, token]);
 
   const createDm = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -387,7 +390,7 @@ export default function MainPage() {
     }
   };
 
-  const fetchMessages = async () => {
+  const fetchMessages = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/channels/${chatStore.activeChannelId}/messages`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -399,9 +402,9 @@ export default function MainPage() {
     } catch (e) {
       console.error('Fetch messages failed', e);
     }
-  };
+  }, [chatStore, token]);
 
-  const fetchDmMessages = async () => {
+  const fetchDmMessages = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/dms/${chatStore.activeConversationId}/messages`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -413,7 +416,7 @@ export default function MainPage() {
     } catch (e) {
       console.error('Fetch DM messages failed', e);
     }
-  };
+  }, [chatStore, token]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
