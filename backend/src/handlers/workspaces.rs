@@ -274,6 +274,32 @@ pub async fn remove_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// GET /api/v1/workspaces/{workspace_id}/members
+///
+/// Lists all member profiles in a workspace.
+pub async fn list_members(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(workspace_id): Path<Uuid>,
+) -> AppResult<Json<Vec<crate::models::user::UserProfile>>> {
+    require_workspace_member(&state, workspace_id, auth.user_id).await?;
+
+    let members = sqlx::query_as::<_, crate::models::user::UserProfile>(
+        r#"
+        SELECT u.id, u.username, u.display_name, u.avatar_url, u.status, u.last_seen_at
+        FROM users u
+        INNER JOIN workspace_members wm ON wm.user_id = u.id
+        WHERE wm.workspace_id = $1
+        ORDER BY u.display_name ASC
+        "#,
+    )
+    .bind(workspace_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(members))
+}
+
 // ── Helpers ──
 
 /// Verify that a user is a member of the given workspace.

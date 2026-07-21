@@ -1,7 +1,10 @@
 pub mod auth;
 pub mod calls;
 pub mod channels;
+pub mod dms;
 pub mod files;
 pub mod messages;
+pub mod reactions;
+pub mod search;
 pub mod users;
 pub mod workspaces;

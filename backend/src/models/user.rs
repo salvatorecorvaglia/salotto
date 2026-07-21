@@ -22,7 +22,7 @@ pub struct User {
 }
 
 /// Safe public projection of a user (no password hash, no email).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct UserProfile {
     pub id: Uuid,
     pub username: String,

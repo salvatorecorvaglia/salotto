@@ -69,6 +69,18 @@ pub enum WsServerMessage {
         user_id: Uuid,
         status: String,
     },
+    /// A user added an emoji reaction to a message.
+    ReactionAdded {
+        message_id: Uuid,
+        user_id: Uuid,
+        emoji: String,
+    },
+    /// A user removed an emoji reaction.
+    ReactionRemoved {
+        message_id: Uuid,
+        user_id: Uuid,
+        emoji: String,
+    },
     /// Server pong (keepalive response).
     Pong,
     /// Error message.

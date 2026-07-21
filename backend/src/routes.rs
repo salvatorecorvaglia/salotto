@@ -30,7 +30,7 @@ pub fn create_router(state: AppState) -> Router {
     let workspace_routes = Router::new()
         .route("/", post(handlers::workspaces::create).get(handlers::workspaces::list_mine))
         .route("/{workspace_id}", get(handlers::workspaces::get_by_id))
-        .route("/{workspace_id}/members", post(handlers::workspaces::add_member))
+        .route("/{workspace_id}/members", post(handlers::workspaces::add_member).get(handlers::workspaces::list_members))
         .route(
             "/{workspace_id}/members/{user_id}",
             delete(handlers::workspaces::remove_member),
@@ -38,7 +38,12 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/{workspace_id}/channels",
             post(handlers::channels::create).get(handlers::channels::list_for_workspace),
-        );
+        )
+        .route(
+            "/{workspace_id}/dms",
+            post(handlers::dms::create_dm).get(handlers::dms::list_dms),
+        )
+        .route("/{workspace_id}/search", get(handlers::search::search_messages));
 
     let channel_routes = Router::new()
         .route("/{channel_id}", get(handlers::channels::get_by_id).patch(handlers::channels::update))
@@ -51,7 +56,12 @@ pub fn create_router(state: AppState) -> Router {
         );
 
     let message_routes = Router::new()
-        .route("/{message_id}", patch(handlers::messages::edit).delete(handlers::messages::delete_msg));
+        .route("/{message_id}", patch(handlers::messages::edit).delete(handlers::messages::delete_msg))
+        .route("/{message_id}/reactions", post(handlers::reactions::add_reaction))
+        .route("/{message_id}/reactions/{emoji}", delete(handlers::reactions::remove_reaction));
+
+    let dm_routes = Router::new()
+        .route("/{conversation_id}/messages", post(handlers::dms::send_dm_message).get(handlers::dms::list_dm_messages));
 
     let file_routes = Router::new()
         .route("/upload", post(handlers::files::upload_file));
@@ -63,6 +73,7 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/workspaces", workspace_routes)
         .nest("/channels", channel_routes)
         .nest("/messages", message_routes)
+        .nest("/dms", dm_routes)
         .nest("/files", file_routes);
 
     // ── Root router with middleware ──

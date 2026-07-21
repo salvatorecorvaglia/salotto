@@ -28,9 +28,43 @@ export interface Attachment {
   size: number;
 }
 
+export interface Reaction {
+  emoji: string;
+  user_id: string;
+}
+
 export interface Message {
   id: string;
-  channel_id: string;
+  channel_id: string | null;
+  conversation_id: string | null;
+  sender_id: string;
+  parent_id: string | null;
+  content: string;
+  attachments: Attachment[];
+  reactions?: Reaction[];
+  is_edited: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DirectConversation {
+  id: string;
+  workspace_id: string;
+  created_at: string;
+  members: {
+    id: string;
+    username: string;
+    display_name: string;
+    avatar_url: string | null;
+    status: string;
+    last_seen_at: string | null;
+  }[];
+}
+
+export interface SearchResultItem {
+  id: string;
+  channel_id: string | null;
+  conversation_id: string | null;
   sender_id: string;
   parent_id: string | null;
   content: string;
@@ -38,6 +72,8 @@ export interface Message {
   is_edited: boolean;
   created_at: string;
   updated_at: string;
+  channel_name: string | null;
+  conversation_members: string[] | null;
 }
 
 interface CallState {
@@ -49,24 +85,34 @@ interface CallState {
 interface ChatState {
   workspaces: Workspace[];
   channels: Channel[];
+  directConversations: DirectConversation[];
   activeWorkspaceId: string | null;
   activeChannelId: string | null;
-  messages: Record<string, Message[]>; // channel_id -> messages
+  activeConversationId: string | null;
+  messages: Record<string, Message[]>; // channel_id or conversation_id -> messages
   activeThreadParent: Message | null;
   typingUsers: Record<string, string[]>; // channel_id -> usernames
   presences: Record<string, string>; // user_id -> status ('online', 'offline')
   activeCall: CallState | null;
+  searchResults: SearchResultItem[];
+  showSearch: boolean;
   socket: WebSocket | null;
 
   setWorkspaces: (workspaces: Workspace[]) => void;
   setChannels: (channels: Channel[]) => void;
+  setDirectConversations: (conversations: DirectConversation[]) => void;
   setActiveWorkspaceId: (id: string | null) => void;
   setActiveChannelId: (id: string | null) => void;
+  setActiveConversationId: (id: string | null) => void;
   setActiveThreadParent: (message: Message | null) => void;
-  addMessage: (channelId: string, message: Message) => void;
-  setMessages: (channelId: string, messages: Message[]) => void;
+  addMessage: (key: string, message: Message) => void;
+  setMessages: (key: string, messages: Message[]) => void;
   setTyping: (channelId: string, userId: string, isTyping: boolean) => void;
   setPresence: (userId: string, status: string) => void;
+  addReaction: (messageId: string, userId: string, emoji: string) => void;
+  removeReaction: (messageId: string, userId: string, emoji: string) => void;
+  setSearchResults: (results: SearchResultItem[]) => void;
+  setShowSearch: (show: boolean) => void;
   setActiveCall: (call: CallState | null) => void;
   connectSocket: () => void;
   disconnectSocket: () => void;
@@ -79,68 +125,140 @@ export const WS_BASE = 'ws://localhost:8080/ws';
 export const useChatStore = create<ChatState>()((set, get) => ({
   workspaces: [],
   channels: [],
+  directConversations: [],
   activeWorkspaceId: null,
   activeChannelId: null,
+  activeConversationId: null,
   messages: {},
   activeThreadParent: null,
   typingUsers: {},
   presences: {},
   activeCall: null,
+  searchResults: [],
+  showSearch: false,
   socket: null,
 
   setWorkspaces: (workspaces) => set({ workspaces }),
   setChannels: (channels) => set({ channels }),
-  setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id, activeChannelId: null, activeThreadParent: null }),
-  setActiveChannelId: (id) => set({ activeChannelId: id, activeThreadParent: null }),
+  setDirectConversations: (directConversations) => set({ directConversations }),
+  setActiveWorkspaceId: (id) =>
+    set({
+      activeWorkspaceId: id,
+      activeChannelId: null,
+      activeConversationId: null,
+      activeThreadParent: null,
+      showSearch: false,
+    }),
+  setActiveChannelId: (id) =>
+    set({
+      activeChannelId: id,
+      activeConversationId: null,
+      activeThreadParent: null,
+      showSearch: false,
+    }),
+  setActiveConversationId: (id) =>
+    set({
+      activeConversationId: id,
+      activeChannelId: null,
+      activeThreadParent: null,
+      showSearch: false,
+    }),
   setActiveThreadParent: (message) => set({ activeThreadParent: message }),
 
-  addMessage: (channelId, message) => set((state) => {
-    const list = state.messages[channelId] || [];
-    // Prevent duplicate messages
-    if (list.some((m) => m.id === message.id)) return state;
-    
-    // If it's a thread reply, update active thread parent if matching
-    let updatedParent = state.activeThreadParent;
-    if (state.activeThreadParent && state.activeThreadParent.id === message.parent_id) {
-      // No change to parent object itself, but UI will query list
-    }
+  addMessage: (key, message) =>
+    set((state) => {
+      const list = state.messages[key] || [];
+      // Prevent duplicate messages
+      if (list.some((m) => m.id === message.id)) return state;
 
-    return {
+      const updatedList = [...list, message].sort((a, b) =>
+        a.created_at.localeCompare(b.created_at)
+      );
+
+      return {
+        messages: {
+          ...state.messages,
+          [key]: updatedList,
+        },
+      };
+    }),
+
+  setMessages: (key, messages) =>
+    set((state) => ({
       messages: {
         ...state.messages,
-        [channelId]: [...list, message].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+        [key]: messages.sort((a, b) => a.created_at.localeCompare(b.created_at)),
       },
-      activeThreadParent: updatedParent,
-    };
-  }),
+    })),
 
-  setMessages: (channelId, messages) => set((state) => ({
-    messages: {
-      ...state.messages,
-      [channelId]: messages.sort((a, b) => a.created_at.localeCompare(b.created_at)),
-    },
-  })),
+  setTyping: (channelId, userId, isTyping) =>
+    set((state) => {
+      const currentTyping = state.typingUsers[channelId] || [];
+      const updated = isTyping
+        ? [...currentTyping.filter((id) => id !== userId), userId]
+        : currentTyping.filter((id) => id !== userId);
+      return {
+        typingUsers: {
+          ...state.typingUsers,
+          [channelId]: updated,
+        },
+      };
+    }),
 
-  setTyping: (channelId, userId, isTyping) => set((state) => {
-    const currentTyping = state.typingUsers[channelId] || [];
-    const updated = isTyping
-      ? [...currentTyping.filter((id) => id !== userId), userId]
-      : currentTyping.filter((id) => id !== userId);
-    return {
-      typingUsers: {
-        ...state.typingUsers,
-        [channelId]: updated,
+  setPresence: (userId, status) =>
+    set((state) => ({
+      presences: {
+        ...state.presences,
+        [userId]: status,
       },
-    };
-  }),
+    })),
 
-  setPresence: (userId, status) => set((state) => ({
-    presences: {
-      ...state.presences,
-      [userId]: status,
-    },
-  })),
+  addReaction: (messageId, userId, emoji) =>
+    set((state) => {
+      const updatedMessages = { ...state.messages };
+      for (const [key, msgList] of Object.entries(updatedMessages)) {
+        const index = msgList.findIndex((m) => m.id === messageId);
+        if (index !== -1) {
+          const msg = msgList[index];
+          const reactions = msg.reactions || [];
+          if (!reactions.some((r) => r.emoji === emoji && r.user_id === userId)) {
+            const updatedMsg = {
+              ...msg,
+              reactions: [...reactions, { emoji, user_id: userId }],
+            };
+            const list = [...msgList];
+            list[index] = updatedMsg;
+            updatedMessages[key] = list;
+          }
+          break;
+        }
+      }
+      return { messages: updatedMessages };
+    }),
 
+  removeReaction: (messageId, userId, emoji) =>
+    set((state) => {
+      const updatedMessages = { ...state.messages };
+      for (const [key, msgList] of Object.entries(updatedMessages)) {
+        const index = msgList.findIndex((m) => m.id === messageId);
+        if (index !== -1) {
+          const msg = msgList[index];
+          const reactions = msg.reactions || [];
+          const updatedMsg = {
+            ...msg,
+            reactions: reactions.filter((r) => !(r.emoji === emoji && r.user_id === userId)),
+          };
+          const list = [...msgList];
+          list[index] = updatedMsg;
+          updatedMessages[key] = list;
+          break;
+        }
+      }
+      return { messages: updatedMessages };
+    }),
+
+  setSearchResults: (searchResults) => set({ searchResults }),
+  setShowSearch: (showSearch) => set({ showSearch }),
   setActiveCall: (call) => set({ activeCall: call }),
 
   connectSocket: () => {
@@ -155,7 +273,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
     ws.onopen = () => {
       console.log('Real-time WebSocket connected');
-      // Periodically ping to keep alive
       const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'ping' }));
@@ -169,22 +286,24 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       try {
         const data = JSON.parse(event.data);
         console.log('WS Message received:', data);
-        
+
         switch (data.type) {
           case 'new_message': {
             const { channel_id, message_id, sender_id, content } = data.payload;
-            // Create a fake message object that matches fields until re-fetch
             const msg: Message = {
               id: message_id,
-              channel_id,
+              channel_id: channel_id,
+              conversation_id: channel_id, // Backward/Forward compatible mapping
               sender_id,
-              parent_id: null, // Basic messages
+              parent_id: null,
               content,
               attachments: [],
+              reactions: [],
               is_edited: false,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             };
+            // Try adding to channel_id or conversation_id
             get().addMessage(channel_id, msg);
             break;
           }
@@ -192,7 +311,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             const { channel_id, message_id, content } = data.payload;
             const list = get().messages[channel_id] || [];
             const updated = list.map((m) =>
-              m.id === message_id ? { ...m, content, is_edited: true, updated_at: new Date().toISOString() } : m
+              m.id === message_id
+                ? {
+                    ...m,
+                    content,
+                    is_edited: true,
+                    updated_at: new Date().toISOString(),
+                  }
+                : m
             );
             set((state) => ({
               messages: { ...state.messages, [channel_id]: updated },
@@ -218,8 +344,17 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             get().setPresence(user_id, status);
             break;
           }
+          case 'reaction_added': {
+            const { message_id, user_id, emoji } = data.payload;
+            get().addReaction(message_id, user_id, emoji);
+            break;
+          }
+          case 'reaction_removed': {
+            const { message_id, user_id, emoji } = data.payload;
+            get().removeReaction(message_id, user_id, emoji);
+            break;
+          }
           case 'pong':
-            // Pong received
             break;
           default:
             break;
@@ -232,7 +367,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     ws.onclose = () => {
       console.log('Real-time WebSocket disconnected');
       set({ socket: null });
-      // Reconnect after 3 seconds
       setTimeout(() => {
         if (useAuthStore.getState().isAuthenticated) {
           get().connectSocket();

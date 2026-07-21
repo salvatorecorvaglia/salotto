@@ -58,7 +58,7 @@ pub async fn send(
         r#"
         INSERT INTO messages (id, channel_id, sender_id, parent_id, content, attachments)
         VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING *
+        RETURNING *, '[]'::json as reactions
         "#,
     )
     .bind(message_id)
@@ -115,9 +115,16 @@ pub async fn list(
     let mut messages = if let Some(before) = query.before {
         sqlx::query_as::<_, Message>(
             r#"
-            SELECT * FROM messages
-            WHERE channel_id = $1 AND id < $2
-            ORDER BY id DESC
+            SELECT m.*,
+                   COALESCE(
+                       (SELECT json_agg(json_build_object('emoji', mr.emoji, 'user_id', mr.user_id)) 
+                        FROM message_reactions mr 
+                        WHERE mr.message_id = m.id), 
+                       '[]'::json
+                   ) as reactions
+            FROM messages m
+            WHERE m.channel_id = $1 AND m.id < $2
+            ORDER BY m.id DESC
             LIMIT $3
             "#,
         )
@@ -129,9 +136,16 @@ pub async fn list(
     } else {
         sqlx::query_as::<_, Message>(
             r#"
-            SELECT * FROM messages
-            WHERE channel_id = $1
-            ORDER BY id DESC
+            SELECT m.*,
+                   COALESCE(
+                       (SELECT json_agg(json_build_object('emoji', mr.emoji, 'user_id', mr.user_id)) 
+                        FROM message_reactions mr 
+                        WHERE mr.message_id = m.id), 
+                       '[]'::json
+                   ) as reactions
+            FROM messages m
+            WHERE m.channel_id = $1
+            ORDER BY m.id DESC
             LIMIT $2
             "#,
         )
@@ -191,10 +205,20 @@ pub async fn edit(
 
     let message = sqlx::query_as::<_, Message>(
         r#"
-        UPDATE messages
-        SET content = $2, is_edited = TRUE, updated_at = NOW()
-        WHERE id = $1
-        RETURNING *
+        WITH updated AS (
+            UPDATE messages
+            SET content = $2, is_edited = TRUE, updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+        )
+        SELECT u.*,
+               COALESCE(
+                   (SELECT json_agg(json_build_object('emoji', mr.emoji, 'user_id', mr.user_id))
+                    FROM message_reactions mr
+                    WHERE mr.message_id = u.id),
+                   '[]'::json
+               ) as reactions
+        FROM updated u
         "#,
     )
     .bind(message_id)
@@ -206,11 +230,11 @@ pub async fn edit(
     if let Ok(workspace_id) = sqlx::query_scalar::<_, Uuid>(
         "SELECT workspace_id FROM channels WHERE id = $1"
     )
-    .bind(message.channel_id)
+    .bind(message.channel_id.unwrap_or_default())
     .fetch_one(&state.db)
     .await {
         let event = crate::ws::handler::WsServerMessage::MessageEdited {
-            channel_id: message.channel_id,
+            channel_id: message.channel_id.unwrap_or_default(),
             message_id: message.id,
             content: message.content.clone(),
         };
@@ -252,11 +276,11 @@ pub async fn delete_msg(
     if let Ok(workspace_id) = sqlx::query_scalar::<_, Uuid>(
         "SELECT workspace_id FROM channels WHERE id = $1"
     )
-    .bind(existing.channel_id)
+    .bind(existing.channel_id.unwrap_or_default())
     .fetch_one(&state.db)
     .await {
         let event = crate::ws::handler::WsServerMessage::MessageDeleted {
-            channel_id: existing.channel_id,
+            channel_id: existing.channel_id.unwrap_or_default(),
             message_id: existing.id,
         };
         let _ = crate::ws::pubsub::publish_event(&state.redis, workspace_id, &event).await;

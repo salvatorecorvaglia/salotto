@@ -8,13 +8,16 @@ use validator::Validate;
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Message {
     pub id: Uuid,
-    pub channel_id: Uuid,
+    pub channel_id: Option<Uuid>,
+    pub conversation_id: Option<Uuid>,
     pub sender_id: Uuid,
     pub parent_id: Option<Uuid>,
     pub content: String,
     /// JSONB array of attachment metadata.
     pub attachments: serde_json::Value,
     pub is_edited: bool,
+    /// JSON aggregation of reactions for this message.
+    pub reactions: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
