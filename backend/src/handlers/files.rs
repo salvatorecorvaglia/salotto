@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, State},
+    extract::{Multipart, State, Path},
     Json,
 };
 use uuid::Uuid;
@@ -87,4 +87,40 @@ pub async fn upload_file(
         content_type,
         size,
     }))
+}
+
+/// GET /api/v1/files/download/{*key}
+///
+/// Download a file from S3 bucket and stream it back.
+pub async fn download_file(
+    _auth: AuthUser,
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> AppResult<impl axum::response::IntoResponse> {
+    let output = state
+        .s3
+        .get_object()
+        .bucket(state.config.s3_bucket.as_str())
+        .key(&key)
+        .send()
+        .await
+        .map_err(|e| {
+            AppError::NotFound(format!("File not found in S3: {}", e))
+        })?;
+
+    let content_type = output
+        .content_type()
+        .unwrap_or("application/octet-stream")
+        .to_string();
+
+    let data = output.body.collect().await.map_err(|e| {
+        AppError::Internal(anyhow::anyhow!("Failed to read body bytes from S3: {}", e))
+    })?.into_bytes();
+
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+        ],
+        data,
+    ))
 }

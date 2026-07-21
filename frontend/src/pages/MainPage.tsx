@@ -15,14 +15,24 @@ import {
   MessageCircle,
   Sparkles,
   Search,
+  Camera,
 } from 'lucide-react';
 import CallRoom from '../components/CallRoom';
 
 const EMOJI_LIST = ['👍', '❤️', '😂', '🔥', '😮', '😢'];
+const STATUS_EMOJI_PRESETS = ['💻', '🥪', '🏝️', '🏠', '🤒', '🚀', '💡'];
 
 export default function MainPage() {
-  const { user, token, clearAuth } = useAuthStore();
+  const { user, token, clearAuth, updateUser } = useAuthStore();
   const chatStore = useChatStore();
+
+  // State for settings modal
+  const [showSettings, setShowSettings] = useState(false);
+  const [editDisplayName, setEditDisplayName] = useState(user?.display_name || '');
+  const [editStatusEmoji, setEditStatusEmoji] = useState(user?.custom_status_emoji || '');
+  const [editStatusText, setEditStatusText] = useState(user?.custom_status_text || '');
+  const [settingsAvatarUrl, setSettingsAvatarUrl] = useState<string | null>(user?.avatar_url || null);
+  const [settingsUploading, setSettingsUploading] = useState(false);
 
   // State for popups
   const [showNewWorkspace, setShowNewWorkspace] = useState(false);
@@ -121,6 +131,13 @@ export default function MainPage() {
       }
       typingTimeoutRef.current = null;
     }, 2500);
+  };
+
+  // Helper to format avatar image URLs
+  const getAvatarUrl = (url: string | null) => {
+    if (!url) return null;
+    if (url.startsWith('http') || url.startsWith('/')) return url;
+    return `${API_BASE}/files/download/${url}`;
   };
 
   // ── API Actions ──
@@ -318,6 +335,66 @@ export default function MainPage() {
       console.error('File upload failed', err);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setSettingsUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch(`${API_BASE}/files/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      if (res.ok) {
+        const meta = await res.json();
+        setSettingsAvatarUrl(meta.key);
+      }
+    } catch (err) {
+      console.error('Avatar upload failed', err);
+    } finally {
+      setSettingsUploading(false);
+    }
+  };
+
+  const saveUserSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_BASE}/users/me`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          display_name: editDisplayName,
+          avatar_url: settingsAvatarUrl,
+          custom_status_emoji: editStatusEmoji || '',
+          custom_status_text: editStatusText || '',
+        }),
+      });
+
+      if (res.ok) {
+        const updated = await res.json();
+        updateUser({
+          display_name: updated.display_name,
+          avatar_url: updated.avatar_url,
+          custom_status_emoji: updated.custom_status_emoji,
+          custom_status_text: updated.custom_status_text,
+        });
+        setShowSettings(false);
+        // Refresh members to reflect current profile details
+        fetchWorkspaceMembers();
+      }
+    } catch (err) {
+      console.error('Failed to save settings', err);
     }
   };
 
@@ -592,28 +669,54 @@ export default function MainPage() {
                 const dmLabel = membersList.map((m) => m.display_name).join(', ') || 'Direct Chat';
                 const firstMember = membersList[0];
                 const presence = firstMember ? (chatStore.presences[firstMember.id] || firstMember.status) : 'offline';
+                
+                // Retrieve member details to display status and avatar
+                const dbMember = workspaceMembers.find(m => m.id === firstMember?.id);
+                const hasCustomStatus = dbMember?.custom_status_emoji || dbMember?.custom_status_text;
 
                 return (
                   <button
                     key={dm.id}
                     onClick={() => chatStore.setActiveConversationId(dm.id)}
-                    className={`w-full px-3 py-2 rounded-xl flex items-center gap-2.5 text-sm transition-colors cursor-pointer ${
+                    className={`w-full px-3 py-2 rounded-xl flex items-center gap-2.5 text-sm transition-all group cursor-pointer relative ${
                       chatStore.activeConversationId === dm.id
                         ? 'bg-slate-900 text-white font-medium'
                         : 'text-slate-400 hover:bg-slate-900/40 hover:text-slate-200'
                     }`}
                   >
                     <div className="relative shrink-0">
-                      <div className="w-5.5 h-5.5 bg-slate-800 rounded-lg flex items-center justify-center font-bold text-[9px] text-white">
-                        {dmLabel.substring(0, 1).toUpperCase()}
-                      </div>
+                      {dbMember?.avatar_url ? (
+                        <img
+                          src={getAvatarUrl(dbMember.avatar_url)!}
+                          alt={dmLabel}
+                          className="w-5.5 h-5.5 rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="w-5.5 h-5.5 bg-slate-800 rounded-lg flex items-center justify-center font-bold text-[9px] text-white">
+                          {dmLabel.substring(0, 1).toUpperCase()}
+                        </div>
+                      )}
                       <div
                         className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-slate-900 ${
                           presence === 'online' ? 'bg-emerald-500' : 'bg-slate-600'
                         }`}
                       />
                     </div>
-                    <span className="truncate">{dmLabel}</span>
+                    <div className="flex-1 min-w-0 text-left">
+                      <div className="truncate flex items-center gap-1.5">
+                        <span>{dmLabel}</span>
+                        {dbMember?.custom_status_emoji && (
+                          <span className="text-xs shrink-0">{dbMember.custom_status_emoji}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Status Hover Details tooltip */}
+                    {hasCustomStatus && (
+                      <span className="absolute left-full ml-2 bg-slate-950 text-white text-[10px] px-2.5 py-1.5 rounded-lg border border-slate-800 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-xl z-50">
+                        {dbMember.custom_status_emoji} {dbMember.custom_status_text}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -622,14 +725,36 @@ export default function MainPage() {
         </div>
 
         {/* Profile Footer */}
-        <div className="p-4 border-t border-slate-900 bg-[#080c18] flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center font-bold text-sm text-white relative">
-            {user?.display_name.substring(0, 1).toUpperCase()}
-            <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
-          </div>
+        <div
+          onClick={() => {
+            setEditDisplayName(user?.display_name || '');
+            setEditStatusEmoji(user?.custom_status_emoji || '');
+            setEditStatusText(user?.custom_status_text || '');
+            setSettingsAvatarUrl(user?.avatar_url || null);
+            setShowSettings(true);
+          }}
+          className="p-4 border-t border-slate-900 bg-[#080c18] flex items-center gap-3 cursor-pointer hover:bg-slate-900/30 transition-colors"
+        >
+          {user?.avatar_url ? (
+            <img
+              src={getAvatarUrl(user.avatar_url)!}
+              alt={user.display_name}
+              className="w-10 h-10 rounded-xl object-cover shrink-0"
+            />
+          ) : (
+            <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center font-bold text-sm text-white relative shrink-0">
+              {user?.display_name.substring(0, 1).toUpperCase()}
+              <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
+            </div>
+          )}
           <div className="flex-1 min-w-0">
-            <div className="text-white font-medium text-sm truncate">{user?.display_name}</div>
-            <div className="text-slate-500 text-xs truncate">@{user?.username}</div>
+            <div className="text-white font-medium text-sm truncate flex items-center gap-1">
+              <span>{user?.display_name}</span>
+              {user?.custom_status_emoji && <span className="text-xs">{user.custom_status_emoji}</span>}
+            </div>
+            <div className="text-slate-500 text-xs truncate">
+              {user?.custom_status_text || `@${user?.username}`}
+            </div>
           </div>
         </div>
       </div>
@@ -692,93 +817,117 @@ export default function MainPage() {
 
           {/* Messages List Area */}
           <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5 no-scrollbar">
-            {currentChannelMessages.filter((m) => !m.parent_id).map((msg) => (
-              <div key={msg.id} className="flex items-start gap-4 group relative">
-                <div className="w-10 h-10 bg-slate-800 border border-slate-700/50 rounded-xl shrink-0 flex items-center justify-center font-semibold text-white select-none">
-                  {msg.sender_id.substring(0, 2).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <span className="text-white font-bold text-sm">User</span>
-                    <span className="text-[10px] text-slate-500">
-                      {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                  <div className="text-slate-300 text-sm break-words leading-relaxed">{msg.content}</div>
+            {currentChannelMessages.filter((m) => !m.parent_id).map((msg) => {
+              const sender = workspaceMembers.find((m) => m.id === msg.sender_id);
+              const senderName = sender?.display_name || 'User';
 
-                  {/* Render reactions */}
-                  {msg.reactions && msg.reactions.length > 0 && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
-                      {Object.entries(
-                        msg.reactions.reduce((acc: Record<string, string[]>, curr) => {
-                          acc[curr.emoji] = acc[curr.emoji] || [];
-                          acc[curr.emoji].push(curr.user_id);
-                          return acc;
-                        }, {})
-                      ).map(([emoji, userIds]) => {
-                        const hasReacted = userIds.includes(user?.id || '');
-                        return (
-                          <button
-                            key={emoji}
-                            onClick={() => toggleReaction(msg.id, emoji, msg.reactions)}
-                            className={`px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-colors cursor-pointer ${
-                              hasReacted
-                                ? 'bg-indigo-950/40 border-indigo-500/40 text-indigo-300'
-                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-                            }`}
-                          >
-                            <span>{emoji}</span>
-                            <span className="font-semibold">{userIds.length}</span>
-                          </button>
-                        );
-                      })}
+              return (
+                <div key={msg.id} className="flex items-start gap-4 group relative">
+                  {sender?.avatar_url ? (
+                    <img
+                      src={getAvatarUrl(sender.avatar_url)!}
+                      alt={senderName}
+                      className="w-10 h-10 rounded-xl object-cover shrink-0"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 bg-slate-800 border border-slate-700/50 rounded-xl shrink-0 flex items-center justify-center font-semibold text-white select-none">
+                      {senderName.substring(0, 2).toUpperCase()}
                     </div>
                   )}
-
-                  {/* Render attachments */}
-                  {msg.attachments && msg.attachments.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {msg.attachments.map((att: any, idx: number) => (
-                        <div
-                          key={idx}
-                          className="flex items-center gap-2.5 p-2.5 bg-slate-900/60 border border-slate-800/80 rounded-xl max-w-xs"
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2 mb-1">
+                      <span className="text-white font-bold text-sm">{senderName}</span>
+                      {sender?.custom_status_emoji && (
+                        <span
+                          className="text-xs shrink-0 cursor-help"
+                          title={sender.custom_status_text || ''}
                         >
-                          <FileText className="h-5 w-5 text-indigo-400" />
-                          <div className="min-w-0 flex-1">
-                            <div className="text-slate-200 text-xs font-medium truncate">{att.filename}</div>
-                            <div className="text-slate-500 text-[10px]">{(att.size / 1024).toFixed(1)} KB</div>
-                          </div>
-                        </div>
+                          {sender.custom_status_emoji}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-500">
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div className="text-slate-300 text-sm break-words leading-relaxed">{msg.content}</div>
+
+                    {/* Render reactions */}
+                    {msg.reactions && msg.reactions.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        {Object.entries(
+                          msg.reactions.reduce((acc: Record<string, string[]>, curr) => {
+                            acc[curr.emoji] = acc[curr.emoji] || [];
+                            acc[curr.emoji].push(curr.user_id);
+                            return acc;
+                          }, {})
+                        ).map(([emoji, userIds]) => {
+                          const hasReacted = userIds.includes(user?.id || '');
+                          return (
+                            <button
+                              key={emoji}
+                              onClick={() => toggleReaction(msg.id, emoji, msg.reactions)}
+                              className={`px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-colors cursor-pointer ${
+                                hasReacted
+                                  ? 'bg-indigo-950/40 border-indigo-500/40 text-indigo-300'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                              }`}
+                            >
+                              <span>{emoji}</span>
+                              <span className="font-semibold">{userIds.length}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Render attachments */}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {msg.attachments.map((att: any, idx: number) => (
+                          <a
+                            key={idx}
+                            href={`${API_BASE}/files/download/${att.key}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2.5 p-2.5 bg-slate-900/60 border border-slate-800/80 rounded-xl max-w-xs hover:bg-slate-900 transition-colors"
+                          >
+                            <FileText className="h-5 w-5 text-indigo-400" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-slate-200 text-xs font-medium truncate">{att.filename}</div>
+                              <div className="text-slate-500 text-[10px]">{(att.size / 1024).toFixed(1)} KB</div>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Popover/ActionBar */}
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0 bg-slate-900 border border-slate-800/80 rounded-lg p-1 transition-opacity absolute top-0 right-0 z-10 shadow-lg">
+                    {/* Emoji Quick Picker */}
+                    <div className="flex border-r border-slate-800 pr-1 mr-1">
+                      {EMOJI_LIST.map((emoji) => (
+                        <button
+                          key={emoji}
+                          onClick={() => toggleReaction(msg.id, emoji, msg.reactions)}
+                          className="p-1 hover:bg-slate-800 rounded text-sm cursor-pointer"
+                        >
+                          {emoji}
+                        </button>
                       ))}
                     </div>
-                  )}
-                </div>
 
-                {/* Popover/ActionBar */}
-                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0 bg-slate-900 border border-slate-800/80 rounded-lg p-1 transition-opacity absolute top-0 right-0 z-10 shadow-lg">
-                  {/* Emoji Quick Picker */}
-                  <div className="flex border-r border-slate-800 pr-1 mr-1">
-                    {EMOJI_LIST.map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => toggleReaction(msg.id, emoji, msg.reactions)}
-                        className="p-1 hover:bg-slate-800 rounded text-sm cursor-pointer"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
+                    <button
+                      onClick={() => chatStore.setActiveThreadParent(msg)}
+                      className="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 cursor-pointer"
+                      title="Reply in thread"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-
-                  <button
-                    onClick={() => chatStore.setActiveThreadParent(msg)}
-                    className="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 cursor-pointer"
-                    title="Reply in thread"
-                  >
-                    <MessageCircle className="h-3.5 w-3.5" />
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={messageEndRef} />
           </div>
 
@@ -876,22 +1025,35 @@ export default function MainPage() {
               </div>
             </div>
 
-            {parentThreadMessages.filter((m) => m.id !== chatStore.activeThreadParent?.id).map((reply) => (
-              <div key={reply.id} className="flex gap-3">
-                <div className="w-8 h-8 bg-slate-800 border border-slate-700/50 rounded-lg shrink-0 flex items-center justify-center font-semibold text-white select-none text-xs">
-                  {reply.sender_id.substring(0, 2).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <span className="text-white font-bold text-xs">User</span>
-                    <span className="text-[9px] text-slate-500">
-                      {new Date(reply.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+            {parentThreadMessages.filter((m) => m.id !== chatStore.activeThreadParent?.id).map((reply) => {
+              const sender = workspaceMembers.find((m) => m.id === reply.sender_id);
+              const senderName = sender?.display_name || 'User';
+
+              return (
+                <div key={reply.id} className="flex gap-3">
+                  {sender?.avatar_url ? (
+                    <img
+                      src={getAvatarUrl(sender.avatar_url)!}
+                      alt={senderName}
+                      className="w-8 h-8 rounded-lg object-cover shrink-0"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 bg-slate-800 border border-slate-700/50 rounded-lg shrink-0 flex items-center justify-center font-semibold text-white select-none text-xs">
+                      {senderName.substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2 mb-1">
+                      <span className="text-white font-bold text-xs">{senderName}</span>
+                      <span className="text-[9px] text-slate-500">
+                        {new Date(reply.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div className="text-slate-300 text-xs break-words leading-relaxed">{reply.content}</div>
                   </div>
-                  <div className="text-slate-300 text-xs break-words leading-relaxed">{reply.content}</div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={threadEndRef} />
           </div>
 
@@ -960,7 +1122,113 @@ export default function MainPage() {
         </div>
       )}
 
-      {/* 6. Create Workspace Modal */}
+      {/* 6. User Profile / Personal Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-50">
+          <div className="w-full max-w-md glass rounded-3xl p-8 relative overflow-hidden shadow-2xl border border-slate-800">
+            <h2 className="text-xl font-bold text-white mb-6">User Settings</h2>
+            <form onSubmit={saveUserSettings} className="space-y-5">
+              {/* Avatar Selector */}
+              <div className="flex flex-col items-center gap-3">
+                <div className="relative group cursor-pointer w-20 h-20 rounded-2xl overflow-hidden bg-slate-800 border border-slate-700/60 flex items-center justify-center">
+                  {settingsAvatarUrl ? (
+                    <img
+                      src={getAvatarUrl(settingsAvatarUrl)!}
+                      alt="Avatar"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-white font-bold text-lg">
+                      {editDisplayName.substring(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <label className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer">
+                    <Camera className="h-5 w-5 text-white" />
+                    <input type="file" onChange={handleAvatarUpload} className="hidden" accept="image/*" />
+                  </label>
+                </div>
+                {settingsUploading && (
+                  <span className="text-[10px] text-slate-500 font-medium">Uploading avatar...</span>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-slate-300 text-sm font-medium mb-1.5">Display Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editDisplayName}
+                  onChange={(e) => setEditDisplayName(e.target.value)}
+                  className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 text-sm font-medium mb-1.5">Status Message</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    maxLength={4}
+                    placeholder="Emoji"
+                    value={editStatusEmoji}
+                    onChange={(e) => setEditStatusEmoji(e.target.value)}
+                    className="w-16 bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2.5 text-white text-center focus:outline-none text-sm placeholder-slate-700"
+                  />
+                  <input
+                    type="text"
+                    maxLength={100}
+                    placeholder="What's on your mind?"
+                    value={editStatusText}
+                    onChange={(e) => setEditStatusText(e.target.value)}
+                    className="flex-1 bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white focus:outline-none text-sm placeholder-slate-700"
+                  />
+                </div>
+                {/* Emoji status presets */}
+                <div className="flex gap-1.5 mt-2.5">
+                  {STATUS_EMOJI_PRESETS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => setEditStatusEmoji(emoji)}
+                      className="w-7 h-7 bg-slate-900 border border-slate-800 rounded-lg hover:border-indigo-500/50 flex items-center justify-center text-sm cursor-pointer"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditStatusEmoji('');
+                      setEditStatusText('');
+                    }}
+                    className="text-[10px] text-slate-500 hover:text-slate-300 ml-auto cursor-pointer"
+                  >
+                    Clear Status
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-8">
+                <button
+                  type="button"
+                  onClick={() => setShowSettings(false)}
+                  className="px-4 py-2.5 text-slate-400 hover:text-white text-sm cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl text-sm shadow-lg active:scale-95 cursor-pointer"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 7. Create Workspace Modal */}
       {showNewWorkspace && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-50">
           <div className="w-full max-w-md glass rounded-3xl p-8 relative overflow-hidden shadow-2xl border border-slate-800">
@@ -1020,7 +1288,7 @@ export default function MainPage() {
         </div>
       )}
 
-      {/* 7. Create Channel Modal */}
+      {/* 8. Create Channel Modal */}
       {showNewChannel && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-50">
           <div className="w-full max-w-md glass rounded-3xl p-8 relative overflow-hidden shadow-2xl border border-slate-800">
@@ -1090,7 +1358,7 @@ export default function MainPage() {
         </div>
       )}
 
-      {/* 8. Start Direct Conversation modal */}
+      {/* 9. Start Direct Conversation modal */}
       {showNewDm && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-50">
           <div className="w-full max-w-md glass rounded-3xl p-8 relative overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[80vh]">
@@ -1111,9 +1379,17 @@ export default function MainPage() {
                             : 'bg-slate-950/30 border-slate-800 hover:bg-slate-900/30'
                         }`}
                       >
-                        <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center font-bold text-[10px] text-white">
-                          {m.display_name.substring(0, 1).toUpperCase()}
-                        </div>
+                        {m.avatar_url ? (
+                          <img
+                            src={getAvatarUrl(m.avatar_url)!}
+                            alt={m.display_name}
+                            className="w-8 h-8 rounded-lg object-cover shrink-0"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center font-bold text-[10px] text-white">
+                            {m.display_name.substring(0, 1).toUpperCase()}
+                          </div>
+                        )}
                         <div className="flex-1 min-w-0">
                           <div className="text-white text-xs font-semibold">{m.display_name}</div>
                           <div className="text-slate-500 text-[10px]">@{m.username}</div>

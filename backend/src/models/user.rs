@@ -17,6 +17,8 @@ pub struct User {
     pub avatar_url: Option<String>,
     pub status: String,
     pub last_seen_at: Option<DateTime<Utc>>,
+    pub custom_status_emoji: Option<String>,
+    pub custom_status_text: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -30,6 +32,8 @@ pub struct UserProfile {
     pub avatar_url: Option<String>,
     pub status: String,
     pub last_seen_at: Option<DateTime<Utc>>,
+    pub custom_status_emoji: Option<String>,
+    pub custom_status_text: Option<String>,
 }
 
 impl From<User> for UserProfile {
@@ -41,6 +45,8 @@ impl From<User> for UserProfile {
             avatar_url: u.avatar_url,
             status: u.status,
             last_seen_at: u.last_seen_at,
+            custom_status_emoji: u.custom_status_emoji,
+            custom_status_text: u.custom_status_text,
         }
     }
 }
@@ -80,6 +86,8 @@ pub struct UpdateProfilePayload {
     #[validate(length(min = 1, max = 64, message = "Display name must be 1–64 characters"))]
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
+    pub custom_status_emoji: Option<String>,
+    pub custom_status_text: Option<String>,
 }
 
 /// Auth response returned after login/register/refresh.

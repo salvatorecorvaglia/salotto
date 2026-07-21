@@ -64,7 +64,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/{conversation_id}/messages", post(handlers::dms::send_dm_message).get(handlers::dms::list_dm_messages));
 
     let file_routes = Router::new()
-        .route("/upload", post(handlers::files::upload_file));
+        .route("/upload", post(handlers::files::upload_file))
+        .route("/download/{*key}", get(handlers::files::download_file));
 
     // ── Assemble the full API ──
     let api = Router::new()

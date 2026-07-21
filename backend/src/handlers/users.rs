@@ -45,6 +45,14 @@ pub async fn update_me(
         SET
             display_name = COALESCE($2, display_name),
             avatar_url   = COALESCE($3, avatar_url),
+            custom_status_emoji = CASE 
+                WHEN $4 IS NOT NULL THEN (CASE WHEN $4 = '' THEN NULL ELSE $4 END)
+                ELSE custom_status_emoji 
+            END,
+            custom_status_text = CASE 
+                WHEN $5 IS NOT NULL THEN (CASE WHEN $5 = '' THEN NULL ELSE $5 END)
+                ELSE custom_status_text 
+            END,
             updated_at   = NOW()
         WHERE id = $1
         RETURNING *
@@ -53,6 +61,8 @@ pub async fn update_me(
     .bind(auth.user_id)
     .bind(&payload.display_name)
     .bind(&payload.avatar_url)
+    .bind(&payload.custom_status_emoji)
+    .bind(&payload.custom_status_text)
     .fetch_one(&state.db)
     .await?;
 

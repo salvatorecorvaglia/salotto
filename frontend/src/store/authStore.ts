@@ -7,6 +7,8 @@ export interface UserProfile {
   avatar_url: string | null;
   status: string;
   last_seen_at: string | null;
+  custom_status_emoji: string | null;
+  custom_status_text: string | null;
 }
 
 interface AuthState {
@@ -16,6 +18,7 @@ interface AuthState {
   isAuthenticated: boolean;
   setAuth: (token: string, refreshToken: string, user: UserProfile) => void;
   clearAuth: () => void;
+  updateUser: (user: Partial<UserProfile>) => void;
 }
 
 export const useAuthStore = create<AuthState>()((set) => {
@@ -42,5 +45,11 @@ export const useAuthStore = create<AuthState>()((set) => {
       localStorage.removeItem('user');
       set({ token: null, refreshToken: null, user: null, isAuthenticated: false });
     },
+    updateUser: (updatedUser) => set((state) => {
+      if (!state.user) return state;
+      const newUser = { ...state.user, ...updatedUser };
+      localStorage.setItem('user', JSON.stringify(newUser));
+      return { user: newUser };
+    }),
   };
 });
