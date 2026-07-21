@@ -1,6 +1,38 @@
 import { create } from 'zustand';
 import { useAuthStore } from './authStore';
 
+const triggerNotification = async (title: string, body: string) => {
+  // 1. Tauri Native Notification
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    try {
+      const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification');
+      let permissionGranted = await isPermissionGranted();
+      if (!permissionGranted) {
+        const permission = await requestPermission();
+        permissionGranted = permission === 'granted';
+      }
+      if (permissionGranted) {
+        sendNotification({ title, body });
+      }
+    } catch (err) {
+      console.error('Failed to send Tauri notification:', err);
+    }
+    return;
+  }
+
+  // 2. Browser standard notification fallback
+  if ('Notification' in window) {
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body });
+    } else if (Notification.permission !== 'denied') {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        new Notification(title, { body });
+      }
+    }
+  }
+};
+
 export interface Workspace {
   id: string;
   name: string;
@@ -305,6 +337,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             };
             // Try adding to channel_id or conversation_id
             get().addMessage(channel_id, msg);
+
+            // Trigger notification if not from self
+            const currentUserId = useAuthStore.getState().user?.id;
+            if (sender_id !== currentUserId) {
+              triggerNotification("New Message Received", content);
+            }
             break;
           }
           case 'message_edited': {
