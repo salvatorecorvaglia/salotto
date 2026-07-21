@@ -30,11 +30,11 @@ sqlx = { version = "0.8", features = [
 redis = { version = "0.27", features = ["aio", "tokio-comp"] }
 
 # ── S3 / MinIO ──
-aws-sdk-s3 = "1"
+aws-sdk-s3 = { version = "1", default-features = false, features = ["rt-tokio", "default-https-client"] }
 
 # ── Authentication ──
 argon2 = "0.5"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 sha2 = "0.10"
 hex = "0.4"
 
