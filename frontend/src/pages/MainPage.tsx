@@ -76,49 +76,7 @@ export default function MainPage() {
   const threadEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<any | null>(null);
 
-  // Connect socket and fetch workspaces
-  useEffect(() => {
-    chatStore.connectSocket();
-    fetchWorkspaces();
-    return () => {
-      chatStore.disconnectSocket();
-    };
-  }, [chatStore, fetchWorkspaces]);
 
-  // Fetch domain entities on active workspace changes
-  useEffect(() => {
-    if (chatStore.activeWorkspaceId) {
-      fetchChannels();
-      fetchDms();
-      fetchWorkspaceMembers();
-    }
-  }, [chatStore.activeWorkspaceId, fetchChannels, fetchDms, fetchWorkspaceMembers]);
-
-  // Fetch messages when active channel changes
-  useEffect(() => {
-    if (chatStore.activeChannelId) {
-      fetchMessages();
-    }
-  }, [chatStore.activeChannelId, fetchMessages]);
-
-  // Fetch DM messages when active DM changes
-  useEffect(() => {
-    if (chatStore.activeConversationId) {
-      fetchDmMessages();
-    }
-  }, [chatStore.activeConversationId, fetchDmMessages]);
-
-  // Auto-scroll messages
-  const activeMessageKey = chatStore.activeChannelId || chatStore.activeConversationId || '';
-  const messagesForActiveChannel = chatStore.messages[activeMessageKey];
-
-  useEffect(() => {
-    messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messagesForActiveChannel]);
-
-  useEffect(() => {
-    threadEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatStore.activeThreadParent]);
 
   // Handle typing status updates
   const handleTyping = () => {
@@ -417,6 +375,50 @@ export default function MainPage() {
       console.error('Fetch DM messages failed', e);
     }
   }, [chatStore, token]);
+
+  // Connect socket and fetch workspaces
+  useEffect(() => {
+    chatStore.connectSocket();
+    fetchWorkspaces();
+    return () => {
+      chatStore.disconnectSocket();
+    };
+  }, [chatStore, fetchWorkspaces]);
+
+  // Fetch domain entities on active workspace changes
+  useEffect(() => {
+    if (chatStore.activeWorkspaceId) {
+      fetchChannels();
+      fetchDms();
+      fetchWorkspaceMembers();
+    }
+  }, [chatStore.activeWorkspaceId, fetchChannels, fetchDms, fetchWorkspaceMembers]);
+
+  // Fetch messages when active channel changes
+  useEffect(() => {
+    if (chatStore.activeChannelId) {
+      fetchMessages();
+    }
+  }, [chatStore.activeChannelId, fetchMessages]);
+
+  // Fetch DM messages when active DM changes
+  useEffect(() => {
+    if (chatStore.activeConversationId) {
+      fetchDmMessages();
+    }
+  }, [chatStore.activeConversationId, fetchDmMessages]);
+
+  // Auto-scroll messages
+  const activeMessageKey = chatStore.activeChannelId || chatStore.activeConversationId || '';
+  const messagesForActiveChannel = chatStore.messages[activeMessageKey];
+
+  useEffect(() => {
+    messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messagesForActiveChannel]);
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatStore.activeThreadParent]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
