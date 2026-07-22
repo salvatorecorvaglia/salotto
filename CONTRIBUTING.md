@@ -58,8 +58,4 @@ We recommend writing clean and descriptive commit messages. Following the **Conv
 
 ---
 
-## 🔒 Security
-If you discover a security vulnerability, please do **not** open a public issue. Follow the instructions in our [SECURITY.md](./SECURITY.md) to report it privately.
-
-## ⚖️ License & Contributions
-By contributing to Salotto, you agree that your contributions will be licensed under the project's [MIT License](./LICENSE).
+Happy coding! 🐦‍⬛

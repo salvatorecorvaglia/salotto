@@ -1,6 +1,6 @@
 # Salotto 🛋️
 
-**Salotto** (Italian for *"living room"*) is a secure, self-hosted, real-time team communication platform designed to provide full data ownership, private direct messaging, persistent channels, and integrated WebRTC video/voice calls. Built with a modern, high-performance technology stack, it provides a seamless experience via web browsers and a dedicated desktop application.
+**Salotto is a secure, self-hosted, real-time team communication platform designed to provide full data ownership, private direct messaging, persistent channels, and integrated WebRTC video/voice calls.**
 
 ---
 
@@ -130,10 +130,14 @@ npm run tauri dev
 
 ---
 
-## 👥 Contributors
+## 🤝 Contributing
 
-Contributions are welcome! Please read [CONTRIBUTING.md](./CONTRIBUTING.md) to learn how to propose changes, report issues, and build the codebase.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## 📄 License
+## 📝 License
 
-This project is licensed under the [MIT License](LICENSE).
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
+
+---
+
+**Author**: [Salvatore Corvaglia](https://github.com/salvatorecorvaglia)

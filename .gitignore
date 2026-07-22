@@ -5,22 +5,30 @@ target/
 # ── Node / Frontend ──
 node_modules/
 dist/
+dist-ssr/
 .next/
 *.tsbuildinfo
+coverage/
 
 # ── Tauri ──
 desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas
 
 # ── Environment ──
 .env
+.env.*
 !.env.example
 
-# ── IDE ──
+# ── IDE & Editors ──
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
 
 # ── OS ──
 .DS_Store
@@ -28,12 +36,17 @@ Thumbs.db
 
 # ── Logs ──
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # ── SQLx offline cache ──
 # Uncomment if you use SQLX_OFFLINE mode in CI
 # .sqlx/
 
-# AI Tools
+# AI Tools & Agents
 .openai/
 .chatgpt/
 gpt-config.json
@@ -51,4 +64,5 @@ claude-settings.json
 .copilot/
 .codex/
 .cagent/
+.cursor/
 CLAUDE.md
