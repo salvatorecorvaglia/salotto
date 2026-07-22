@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -44,10 +44,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
@@ -70,7 +70,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci
+        working-directory: desktop
+
+      - name: Verify Desktop Frontend Build
+        run: npm run build
+        working-directory: desktop
 
       - name: Install Tauri system dependencies
         run: |
@@ -89,8 +104,16 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-          components: clippy
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+        working-directory: desktop
 
       - name: Clippy check (Tauri Rust wrapper)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        working-directory: desktop
+
+      - name: Run Desktop tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
         working-directory: desktop
