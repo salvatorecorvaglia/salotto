@@ -68,11 +68,13 @@ pub async fn upload_file(
             if let Some(ws_id) = workspace_id_opt {
                 super::workspaces::require_workspace_member(&state, ws_id, auth.user_id).await?;
             } else if let Some(chan_id) = channel_id_opt {
-                let ws_id = sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM channels WHERE id = $1")
-                    .bind(chan_id)
-                    .fetch_optional(&state.db)
-                    .await?
-                    .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+                let ws_id = sqlx::query_scalar::<_, Uuid>(
+                    "SELECT workspace_id FROM channels WHERE id = $1",
+                )
+                .bind(chan_id)
+                .fetch_optional(&state.db)
+                .await?
+                .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
                 super::workspaces::require_workspace_member(&state, ws_id, auth.user_id).await?;
                 workspace_id_opt = Some(ws_id);
             }
@@ -148,10 +150,11 @@ pub async fn download_file(
     Path(key): Path<String>,
 ) -> AppResult<impl axum::response::IntoResponse> {
     // If recorded in files table, enforce workspace membership check
-    if let Some(ws_id) = sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM files WHERE key = $1")
-        .bind(&key)
-        .fetch_optional(&state.db)
-        .await?
+    if let Some(ws_id) =
+        sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM files WHERE key = $1")
+            .bind(&key)
+            .fetch_optional(&state.db)
+            .await?
     {
         super::workspaces::require_workspace_member(&state, ws_id, auth.user_id).await?;
     }
