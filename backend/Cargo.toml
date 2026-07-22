@@ -34,7 +34,7 @@ aws-sdk-s3 = { version = "1", default-features = false, features = ["rt-tokio", 
 
 # ── Authentication ──
 argon2 = "0.5"
-jsonwebtoken = "10"
+jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
 sha2 = "0.10"
 hex = "0.4"
 

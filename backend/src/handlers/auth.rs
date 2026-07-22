@@ -85,6 +85,11 @@ pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
 ) -> AppResult<Json<AuthResponse>> {
+    // Purge expired refresh tokens asynchronously
+    let _ = sqlx::query("DELETE FROM refresh_tokens WHERE expires_at <= NOW()")
+        .execute(&state.db)
+        .await;
+
     // Find user by email
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&payload.email)
@@ -156,6 +161,11 @@ pub async fn refresh(
         .execute(&state.db)
         .await?;
 
+    // Purge expired tokens
+    let _ = sqlx::query("DELETE FROM refresh_tokens WHERE expires_at <= NOW()")
+        .execute(&state.db)
+        .await;
+
     // Fetch user
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(claims.sub)
@@ -202,6 +212,11 @@ pub async fn logout(
             .execute(&state.db)
             .await?;
     }
+
+    // Purge expired tokens overall
+    let _ = sqlx::query("DELETE FROM refresh_tokens WHERE expires_at <= NOW()")
+        .execute(&state.db)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }

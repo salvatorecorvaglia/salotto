@@ -35,9 +35,7 @@ pub async fn search_messages(
     // 1. Verify workspace membership
     super::workspaces::require_workspace_member(&state, workspace_id, auth.user_id).await?;
 
-    let search_pattern = format!("%{}%", query.q);
-
-    // 2. Query Postgres
+    // 2. Query Postgres using full-text search or fallback ILIKE
     let results = sqlx::query_as::<_, SearchResultItem>(
         r#"
         SELECT 
@@ -57,7 +55,13 @@ pub async fn search_messages(
                 FROM direct_conversation_members dcm
                 INNER JOIN users u ON u.id = dcm.user_id
                 WHERE dcm.conversation_id = m.conversation_id
-            ) as conversation_members
+            ) as conversation_members,
+            COALESCE(
+                (SELECT json_agg(json_build_object('emoji', mr.emoji, 'user_id', mr.user_id)) 
+                 FROM message_reactions mr 
+                 WHERE mr.message_id = m.id), 
+                '[]'::json
+            ) as reactions
         FROM messages m
         LEFT JOIN channels c ON c.id = m.channel_id
         LEFT JOIN direct_conversations dc ON dc.id = m.conversation_id
@@ -77,14 +81,17 @@ pub async fn search_messages(
                 WHERE dcm.conversation_id = dc.id AND dcm.user_id = $2
             ))
         )
-        AND m.content ILIKE $3
+        AND (
+            m.search_vector @@ websearch_to_tsquery('english', $3)
+            OR m.content ILIKE format('%%%s%%', $3)
+        )
         ORDER BY m.created_at DESC
         LIMIT 50
         "#,
     )
     .bind(workspace_id)
     .bind(auth.user_id)
-    .bind(&search_pattern)
+    .bind(&query.q)
     .fetch_all(&state.db)
     .await?;
 

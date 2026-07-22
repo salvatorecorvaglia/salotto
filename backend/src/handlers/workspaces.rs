@@ -29,6 +29,9 @@ pub async fn create(
 
     let workspace_id = Uuid::now_v7();
 
+    // Start a database transaction
+    let mut tx = state.db.begin().await?;
+
     // Create the workspace
     let workspace = sqlx::query_as::<_, Workspace>(
         r#"
@@ -42,7 +45,7 @@ pub async fn create(
     .bind(&payload.slug)
     .bind(&payload.description)
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
 
     // Add the creator as the workspace owner
@@ -55,7 +58,7 @@ pub async fn create(
     .bind(workspace_id)
     .bind(auth.user_id)
     .bind(WorkspaceRole::Owner.as_str())
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
 
     // Auto-create a #general channel
@@ -69,15 +72,17 @@ pub async fn create(
     .bind(channel_id)
     .bind(workspace_id)
     .bind(auth.user_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
 
     // Auto-join the creator to #general
     sqlx::query("INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)")
         .bind(channel_id)
         .bind(auth.user_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+
+    tx.commit().await?;
 
     Ok((StatusCode::CREATED, Json(workspace)))
 }

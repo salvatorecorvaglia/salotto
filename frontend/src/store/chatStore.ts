@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 import { useAuthStore } from './authStore';
 
-const triggerNotification = async (title: string, body: string) => {
+const triggerNotification = async (title: string, body: string, isCurrentChannelFocused: boolean = false) => {
+  // If the document is currently focused and active in the current channel, don't trigger intrusive notifications
+  if (typeof document !== 'undefined' && document.hasFocus() && isCurrentChannelFocused) {
+    return;
+  }
+
   // 1. Tauri Native Notification
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
     try {
@@ -340,8 +345,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
             // Trigger notification if not from self
             const currentUserId = useAuthStore.getState().user?.id;
+            const currentActiveId = get().activeChannelId || get().activeConversationId;
+            const isFocused = currentActiveId === channel_id;
             if (sender_id !== currentUserId) {
-              triggerNotification("New Message Received", content);
+              triggerNotification("New Message Received", content, isFocused);
             }
             break;
           }

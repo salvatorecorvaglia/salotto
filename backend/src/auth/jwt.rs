@@ -85,3 +85,33 @@ pub fn hash_token(token: &str) -> String {
     hasher.update(token.as_bytes());
     hex::encode(hasher.finalize())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_jwt_access_and_refresh_tokens() {
+        let secret = "test_secret_key_1234567890_salotto_key";
+        let user_id = Uuid::now_v7();
+
+        // 1. Create access token
+        let access_token = create_access_token(user_id, secret, 900).unwrap();
+        let claims = validate_token(&access_token, secret).unwrap();
+
+        assert_eq!(claims.sub, user_id);
+        assert_eq!(claims.token_type, "access");
+
+        // 2. Create refresh token
+        let refresh_token = create_refresh_token(user_id, secret, 604800).unwrap();
+        let refresh_claims = validate_token(&refresh_token, secret).unwrap();
+
+        assert_eq!(refresh_claims.sub, user_id);
+        assert_eq!(refresh_claims.token_type, "refresh");
+
+        // 3. Test SHA-256 token hashing
+        let token_hash = hash_token(&refresh_token);
+        assert!(!token_hash.is_empty());
+        assert_eq!(token_hash.len(), 64);
+    }
+}
