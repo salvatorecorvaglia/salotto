@@ -1,0 +1,356 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Validate Tag Ref
+  # ──────────────────────────────────────────────
+  validate:
+    name: Validate Tag Ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Validate tag format
+        run: |
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" && "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "::error::Release workflow must be run on a version tag ref starting with 'v' (e.g. refs/tags/v1.0.0)"
+            exit 1
+          fi
+
+  # ──────────────────────────────────────────────
+  # Quality Gates – parallel checks before release
+  # ──────────────────────────────────────────────
+  quality-backend:
+    name: Quality Gate (Backend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validate
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+        working-directory: backend
+
+      - name: Clippy check
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: backend
+
+      - name: Run tests
+        run: cargo test
+        working-directory: backend
+
+  quality-frontend:
+    name: Quality Gate (Frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validate
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint check
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Verify build
+        run: npm run build
+        working-directory: frontend
+
+  quality-desktop:
+    name: Quality Gate (Desktop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: validate
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci
+        working-directory: desktop
+
+      - name: Verify Desktop Frontend Build
+        run: npm run build
+        working-directory: desktop
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            javascriptcoregtk-4.1 \
+            soup2.4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+        working-directory: desktop
+
+      - name: Clippy check
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        working-directory: desktop
+
+      - name: Run Desktop tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+        working-directory: desktop
+
+  # ──────────────────────────────────────────────
+  # Build & Package Backend Binaries
+  # ──────────────────────────────────────────────
+  build-backend:
+    name: Build Backend (${{ matrix.platform-name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    needs: quality-backend
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform-name: Linux x86_64
+            target: x86_64-unknown-linux-gnu
+            artifact-name: salotto-backend-linux-x86_64
+            asset-name: salotto-backend-linux-x86_64.tar.gz
+          - os: macos-latest
+            platform-name: macOS ARM64
+            target: aarch64-apple-darwin
+            artifact-name: salotto-backend-macos-arm64
+            asset-name: salotto-backend-macos-arm64.tar.gz
+          - os: windows-latest
+            platform-name: Windows x86_64
+            target: x86_64-pc-windows-msvc
+            artifact-name: salotto-backend-windows-x86_64
+            asset-name: salotto-backend-windows-x86_64.zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+        working-directory: backend
+
+      - name: Package binary (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd backend/target/${{ matrix.target }}/release
+          tar -czvf ../../../../${{ matrix.asset-name }} salotto-backend
+
+      - name: Package binary (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path backend/target/${{ matrix.target }}/release/salotto-backend.exe -DestinationPath ${{ matrix.asset-name }}
+
+      - name: Upload Backend Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.asset-name }}
+          retention-days: 30
+
+  # ──────────────────────────────────────────────
+  # Build & Publish Tauri Desktop Application
+  # ──────────────────────────────────────────────
+  build-desktop:
+    name: Build Desktop (${{ matrix.platform }})
+    permissions:
+      contents: write
+    needs: [quality-frontend, quality-desktop]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: ''
+          - platform: 'ubuntu-22.04'
+            args: ''
+          - platform: 'windows-latest'
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 40
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install Desktop Node Dependencies
+        run: npm ci
+        working-directory: desktop
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install Linux dependencies (ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            javascriptcoregtk-4.1 \
+            soup2.4
+
+      - name: Disable updater if signing key is missing
+        if: ${{ env.TAURI_SIGNING_PRIVATE_KEY == '' }}
+        shell: bash
+        run: |
+          echo "TAURI_SIGNING_PRIVATE_KEY is not set. Disabling updater in tauri.conf.json."
+          jq '.bundle.createUpdaterArtifacts = false' desktop/src-tauri/tauri.conf.json > temp.json && mv temp.json desktop/src-tauri/tauri.conf.json
+
+      - name: Build Desktop Release with Tauri Action
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          projectPath: desktop
+          tagName: v__VERSION__
+          releaseName: 'Salotto v__VERSION__'
+          releaseBody: 'See release assets to download Salotto for your operating system.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  # ──────────────────────────────────────────────
+  # Finalize – publish release with release notes
+  # ──────────────────────────────────────────────
+  finalize:
+    name: Finalize Release
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-desktop]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download Backend Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: backend-assets
+          merge-multiple: true
+
+      - name: Extract Release Notes
+        id: extract_notes
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          NOTES=""
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(sed -e "1,/## \[$VERSION\]/d" -e '/## \[/,$d' CHANGELOG.md 2>/dev/null || true)
+          fi
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES="Salotto release $TAG"
+          fi
+          {
+            echo 'notes<<EOF'
+            echo "$NOTES"
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+      - name: Attach Backend Assets & Publish Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES: ${{ steps.extract_notes.outputs.notes }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          
+          # Upload backend artifacts to the release created by tauri-action
+          if [ -d backend-assets ]; then
+            for file in backend-assets/*; do
+              if [ -f "$file" ]; then
+                echo "Uploading $file to release $TAG..."
+                gh release upload "$TAG" "$file" --clobber --repo "$GITHUB_REPOSITORY" || true
+              fi
+            done
+          fi
+
+          # Publish draft release with release notes
+          gh release edit "$TAG" \
+            --draft=false \
+            --title "Salotto v$VERSION" \
+            --notes "$RELEASE_NOTES" \
+            --repo "$GITHUB_REPOSITORY"
